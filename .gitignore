@@ -23,6 +23,9 @@ test_fix_*.txt
 src/hackerrank_*
 hackerrank_*
 
+# Ignored Agent configuration files
+.agents/
+
 # IDE and Editor files
 .vscode/
 .idea/
