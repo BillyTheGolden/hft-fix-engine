@@ -19,6 +19,10 @@ sbe_messages_*.data
 test_book_sbe_*.data
 test_fix_*.txt
 
+# Ignored Hackerrank files
+src/hackerrank_*
+hackerrank_*
+
 # IDE and Editor files
 .vscode/
 .idea/

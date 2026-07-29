@@ -147,16 +147,6 @@ target_link_options(hft_order_book_engine PRIVATE -Wl,-z,common-page-size=209715
 find_package(GTest REQUIRED)
 find_package(benchmark REQUIRED)
 
-# HackerRank HFT Simulator Google Test & GMock Executable
-add_executable(hackerrank_gtest "src/hackerrank_simulator_gtest.cpp")
-target_compile_options(hackerrank_gtest PRIVATE -Wall -Wextra -Wpedantic)
-target_link_libraries(hackerrank_gtest PRIVATE GTest::gtest GTest::gmock GTest::gtest_main Threads::Threads)
-
-# HackerRank HFT Simulator Google Benchmark Executable
-add_executable(hackerrank_gbenchmark "src/hackerrank_simulator_gbenchmark.cpp")
-target_compile_options(hackerrank_gbenchmark PRIVATE -Wall -Wextra -Wpedantic -O3)
-target_link_libraries(hackerrank_gbenchmark PRIVATE benchmark::benchmark Threads::Threads)
-
 if(ENABLE_NUMA)
     target_compile_definitions(hft_fix_engine PRIVATE HFT_ENABLE_NUMA)
     target_compile_definitions(test_arena PRIVATE HFT_ENABLE_NUMA)

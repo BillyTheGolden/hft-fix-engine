@@ -220,5 +220,3 @@ Generated executables in `./bin/`:
 - `hft_matching_engine`: Order Matching Engine with Multi-Protocol support.
 - `protocol_arena`: Multi-Protocol performance benchmark arena (FIX vs OUCH vs SBE).
 - `test_arena`: 7-Scenario Resilience Test Arena.
-- `hackerrank_gtest`: Google Test & GMock unit test suite.
-- `hackerrank_gbenchmark`: Google Microbenchmark performance test suite.
