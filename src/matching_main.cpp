@@ -7,11 +7,12 @@
 #include "hft/common/SPSCQueue.hpp"
 #include "hft/common/SystemOptimizations.hpp"
 #include "hft/common/Types.hpp"
+#include "hft/matching/MatchingWorker.hpp"
 #include "hft/monitoring/PerformanceMonitor.hpp"
 #include "hft/monitoring/Telemetry.hpp"
 #include "hft/networking/FixProducer.hpp"
+#include "hft/networking/RxConsumerFactory.hpp"
 #include "hft/networking/RxRingConsumer.hpp"
-#include "hft/matching/MatchingWorker.hpp"
 
 #include <csignal>
 #include <cstdlib>
@@ -33,7 +34,7 @@ static void handle_signal(int signum) noexcept
     }
 }
 
-static void print_usage(const char* prog_name)
+static void print_usage(const char *prog_name)
 {
     cerr << "====================================================\n"
          << "  HFT MULTI-PROTOCOL ORDER MATCHING ENGINE\n"
@@ -56,7 +57,7 @@ static void print_usage(const char* prog_name)
          << "====================================================\n";
 }
 
-int main(int argc, char* argv[])
+int main(int argc, char *argv[])
 {
     for (int i = 1; i < argc; ++i)
     {
@@ -84,7 +85,8 @@ int main(int argc, char* argv[])
 
     if (geteuid() != 0)
     {
-        hft::common::log_warn("[Main] Note: Running without root privileges. PACKET_MMAP will fall back to high-speed AF_INET UDP socket.");
+        hft::common::log_warn("[Main] Note: Running without root privileges. PACKET_MMAP will fall back to high-speed "
+                              "AF_INET UDP socket.");
     }
 
     const string interface_name = argv[1];
@@ -131,14 +133,16 @@ int main(int argc, char* argv[])
             string line;
             while (getline(f, line))
             {
-                if (!line.empty()) ++total_messages;
+                if (!line.empty())
+                    ++total_messages;
             }
         }
 
         if (!protocol_explicit)
         {
             string lower_path = fix_file_path;
-            for (char &c : lower_path) c = static_cast<char>(tolower(c));
+            for (char &c : lower_path)
+                c = static_cast<char>(tolower(c));
             if (lower_path.find("sbe") != string::npos)
             {
                 protocol_type = hft::protocol::ProtocolType::SBE;
@@ -157,18 +161,21 @@ int main(int argc, char* argv[])
         }
         catch (...)
         {
-            cerr << "[Main] Error: third argument '" << source_param << "' must be an existing file or integer count.\n";
+            cerr << "[Main] Error: third argument '" << source_param
+                 << "' must be an existing file or integer count.\n";
             return EXIT_FAILURE;
         }
     }
 
     string proto_prefix = "fix";
-    if (protocol_type == hft::protocol::ProtocolType::OUCH) proto_prefix = "ouch";
-    else if (protocol_type == hft::protocol::ProtocolType::SBE) proto_prefix = "sbe";
+    if (protocol_type == hft::protocol::ProtocolType::OUCH)
+        proto_prefix = "ouch";
+    else if (protocol_type == hft::protocol::ProtocolType::SBE)
+        proto_prefix = "sbe";
 
     const string target_ip = (interface_name == "lo") ? "127.0.0.1" : "239.255.0.1";
     const string log_filename = proto_prefix + "_hft_matching_engine.log";
-    const string csv_filename = proto_prefix + "_matching_metrics_time_series.csv";
+    const string csv_filename = proto_prefix + "_metrics_time_series.csv";
 
     int cpu_count = hft::common::get_cpu_count();
     int worker_cpu = (pin_cores && cpu_count >= 2) ? 1 : -1;
@@ -180,8 +187,9 @@ int main(int argc, char* argv[])
     hft::common::g_cycles_per_ns = hft::common::calibrate_rdtsc();
 
     // Allocate shared queue and telemetry structures on 2MB Huge Pages
-    auto* shared_queue = hft::common::allocate_on_huge_pages<hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192>>();
-    auto* shared_telemetry = hft::common::allocate_on_huge_pages<hft::monitoring::TelemetryCounters>();
+    auto *shared_queue =
+        hft::common::allocate_on_huge_pages<hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192>>();
+    auto *shared_telemetry = hft::common::allocate_on_huge_pages<hft::monitoring::TelemetryCounters>();
 
     if (shared_queue == nullptr || shared_telemetry == nullptr)
     {
@@ -196,33 +204,42 @@ int main(int argc, char* argv[])
     hft::common::log_info("  HFT C++20 ORDER MATCHING ENGINE & RESILIENCE GATE ");
     hft::common::log_info("Interface : " + interface_name + " | Port: " + to_string(target_port));
     hft::common::log_info("Protocol  : " + string(hft::protocol::protocol_type_to_string(protocol_type)));
-    hft::common::log_info("Target Msgs: " + to_string(total_messages) + " | Core Pinning: " + (pin_cores ? "ENABLED" : "DISABLED"));
+    hft::common::log_info("Target Msgs: " + to_string(total_messages) +
+                          " | Core Pinning: " + (pin_cores ? "ENABLED" : "DISABLED"));
     if (!fix_file_path.empty())
     {
         hft::common::log_info("Source File : " + fix_file_path);
     }
-    hft::common::log_info("Execution Mode: " + string(direct_queue_mode ? "Direct In-Memory Queue (0% Loss Guaranteed)" : "Network Socket Ring (UDP / PACKET_MMAP)"));
+    hft::common::log_info("Execution Mode: " + string(direct_queue_mode ? "Direct In-Memory Queue (0% Loss Guaranteed)"
+                                                                        : "Network Socket Ring (UDP / PACKET_MMAP)"));
     hft::common::log_info("Telemetry CSV: " + csv_filename + " | Sample Rate: 10 ms");
     hft::common::log_info("Engine Log  : " + log_filename);
     hft::common::log_info("====================================================");
 
     // Instantiate modular components
-    hft::matching::MatchingWorker worker(*shared_queue, *shared_telemetry, log_filename, total_messages, protocol_type, worker_cpu);
-    hft::networking::PacketMmapRxConsumer consumer(interface_name, target_port, *shared_queue, *shared_telemetry, consumer_cpu);
-    hft::networking::UdpFixProducer producer(interface_name, target_ip, target_port, total_messages, fix_file_path, producer_cpu, direct_queue_mode ? shared_queue : nullptr);
+    hft::matching::MatchingWorker worker(*shared_queue, *shared_telemetry, log_filename, total_messages, protocol_type,
+                                         worker_cpu);
+    auto consumer = hft::networking::create_rx_consumer(interface_name, target_port, *shared_queue, *shared_telemetry,
+                                                        consumer_cpu);
+    hft::networking::UdpFixProducer producer(interface_name, target_ip, target_port, total_messages, fix_file_path,
+                                             producer_cpu, direct_queue_mode ? shared_queue : nullptr);
     hft::monitoring::CsvPerformanceMonitor monitor(*shared_telemetry, *shared_queue, csv_filename, 10, monitor_cpu);
 
     // Launch 4 isolated engine threads
     thread t_monitor([&monitor]() { monitor.run(); });
     thread t_worker([&worker]() { worker.run(); });
-    thread t_consumer([&consumer]() { consumer.run(); });
+    thread t_consumer([&consumer]() { consumer->run(); });
     thread t_producer([&producer]() { producer.run(); });
 
     // Join threads on completion or termination
-    if (t_producer.joinable()) t_producer.join();
-    if (t_consumer.joinable()) t_consumer.join();
-    if (t_worker.joinable()) t_worker.join();
-    if (t_monitor.joinable()) t_monitor.join();
+    if (t_producer.joinable())
+        t_producer.join();
+    if (t_consumer.joinable())
+        t_consumer.join();
+    if (t_worker.joinable())
+        t_worker.join();
+    if (t_monitor.joinable())
+        t_monitor.join();
 
     hft::common::ConsoleLogger::getInstance().shutdown();
 

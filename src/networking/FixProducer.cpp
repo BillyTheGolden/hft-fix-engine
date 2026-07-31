@@ -16,9 +16,9 @@ namespace hft::networking
     using namespace std;
 
     UdpFixProducer::UdpFixProducer(string interface_name, string target_ip, uint16_t target_port, size_t total_messages,
-                                   string fix_file_path, int cpu_pin, FixMessagePacktQueue* direct_queue)
+        string fix_file_path, int cpu_pin, FixMessagePacktQueue* direct_queue)
         : m_interface_name(std::move(interface_name)), m_target_ip(std::move(target_ip)), m_target_port(target_port),
-          m_total_messages(total_messages), m_fix_file_path(std::move(fix_file_path)), m_direct_queue(direct_queue), m_cpu_pin(cpu_pin)
+        m_total_messages(total_messages), m_fix_file_path(std::move(fix_file_path)), m_direct_queue(direct_queue), m_cpu_pin(cpu_pin)
     {
         if (!m_fix_file_path.empty())
         {
@@ -54,7 +54,7 @@ namespace hft::networking
                     }
                 }
                 hft::common::log_info("[FixProducer] Loaded " + to_string(m_loaded_messages.size()) +
-                                      " pre-generated trade messages into memory queue from '" + m_fix_file_path + "'.");
+                    " pre-generated trade messages into memory queue from '" + m_fix_file_path + "'.");
             }
             else
             {
@@ -75,12 +75,12 @@ namespace hft::networking
         {
             hft::common::log_info("[Producer] Direct In-Memory Queue Mode active (0% packet loss guaranteed). Pushing packets directly to SPSC queue...");
             size_t injected = 0;
-            for (const auto &msg : m_loaded_messages)
+            for (const auto& msg : m_loaded_messages)
             {
                 if (!hft::common::g_running.load(memory_order_relaxed)) break;
 
                 hft::common::FixMessagePacket pkt{};
-                pkt.payload_len = static_cast<uint32_t>(std::min(msg.size(), hft::common::MAX_FIX_LEN));
+                pkt.payload_len = static_cast<uint32_t>(std::min(msg.size(), hft::common::MAX_PAYLOAD_LEN));
                 pkt.payload = const_cast<char*>(msg.data());
                 pkt.rx_timestamp_cycles = hft::common::rdtsc();
                 pkt.ring_hdr = nullptr;
@@ -93,7 +93,7 @@ namespace hft::networking
             }
 
             hft::common::log_info("[Producer] Queue injection complete (" + to_string(injected) +
-                                  " injected). Producer thread terminating.");
+                " injected). Producer thread terminating.");
             hft::common::g_producer_done.store(true, memory_order_release);
             return;
         }
@@ -119,13 +119,13 @@ namespace hft::networking
 
         // 2. Bind socket specifically to the target interface (e.g., enp4s0 or lo)
         if (!m_interface_name.empty() && setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, m_interface_name.c_str(),
-                                                    static_cast<socklen_t>(m_interface_name.length())) < 0)
+            static_cast<socklen_t>(m_interface_name.length())) < 0)
         {
             hft::common::log_warn("[FixProducer] Warning: Failed to bind UDP producer to device '" + m_interface_name +
-                                  "'. Ensure root/sudo privileges.");
+                "'. Ensure root/sudo privileges.");
         }
 
-        struct sockaddr_in target_addr{};
+        struct sockaddr_in target_addr {};
         memset(&target_addr, 0, sizeof(target_addr));
         target_addr.sin_family = AF_INET;
         target_addr.sin_port = htons(m_target_port);
@@ -137,20 +137,20 @@ namespace hft::networking
         if (!m_loaded_messages.empty())
         {
             hft::common::log_info("[FixProducer] Starting injection of " + to_string(m_loaded_messages.size()) +
-                                  " loaded trade messages from queue to " + m_target_ip + ":" + to_string(m_target_port) +
-                                  "...");
+                " loaded trade messages from queue to " + m_target_ip + ":" + to_string(m_target_port) +
+                "...");
 
             size_t injected = 0;
-            for (const auto &fix_msg : m_loaded_messages)
+            for (const auto& fix_msg : m_loaded_messages)
             {
                 if (!hft::common::g_running.load(memory_order_relaxed)) break;
 
                 ssize_t sent = sendto(sock, fix_msg.data(), fix_msg.size(), 0,
-                                      reinterpret_cast<struct sockaddr *>(&target_addr), sizeof(target_addr));
+                    reinterpret_cast<struct sockaddr*>(&target_addr), sizeof(target_addr));
                 if (sent < 0)
                 {
                     hft::common::log_warn("[FixProducer] Warning: sendto() failed for loaded queue item #" +
-                                          to_string(injected + 1));
+                        to_string(injected + 1));
                 }
                 ++injected;
 
@@ -161,38 +161,38 @@ namespace hft::networking
                 }
             }
             hft::common::log_info("[FixProducer] Queue injection complete (" + to_string(injected) +
-                                  " injected). Producer thread terminating.");
+                " injected). Producer thread terminating.");
         }
         else
         {
             hft::common::log_info("[FixProducer] Starting injection of " + to_string(m_total_messages) +
-                                  " synthetic FIX messages to " + m_target_ip + ":" + to_string(m_target_port) + "...");
+                " synthetic FIX messages to " + m_target_ip + ":" + to_string(m_target_port) + "...");
 
             for (size_t i = 1; i <= m_total_messages && hft::common::g_running.load(memory_order_relaxed); ++i)
             {
                 char fix_msg[512];
                 auto res = format_to_n(fix_msg, sizeof(fix_msg) - 1,
-                                       "8=FIX.4.2\x01"
-                                       "9=95\x01"
-                                       "35=D\x01"
-                                       "49=PRODUCER\x01"
-                                       "56=ENGINE\x01"
-                                       "34={}\x01"
-                                       "52=20260717-18:00:00.000\x01"
-                                       "11=ORD_{}\x01"
-                                       "55=PETR4\x01"
-                                       "54=1\x01"
-                                       "38=1000\x01"
-                                       "40=2\x01"
-                                       "44=35.85\x01"
-                                       "10=128\x01",
-                                       i, i);
+                    "8=FIX.4.2\x01"
+                    "9=95\x01"
+                    "35=D\x01"
+                    "49=PRODUCER\x01"
+                    "56=ENGINE\x01"
+                    "34={}\x01"
+                    "52=20260717-18:00:00.000\x01"
+                    "11=ORD_{}\x01"
+                    "55=PETR4\x01"
+                    "54=1\x01"
+                    "38=1000\x01"
+                    "40=2\x01"
+                    "44=35.85\x01"
+                    "10=128\x01",
+                    i, i);
                 size_t formatted_size = static_cast<size_t>(res.size);
                 size_t len = (formatted_size < sizeof(fix_msg)) ? formatted_size : sizeof(fix_msg) - 1;
                 fix_msg[len] = '\0';
 
                 ssize_t sent = sendto(sock, fix_msg, static_cast<size_t>(len), 0,
-                                      reinterpret_cast<struct sockaddr *>(&target_addr), sizeof(target_addr));
+                    reinterpret_cast<struct sockaddr*>(&target_addr), sizeof(target_addr));
                 if (sent < 0)
                 {
                     hft::common::log_warn("[FixProducer] Warning: sendto() failed for sequence " + to_string(i));

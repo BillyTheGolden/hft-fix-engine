@@ -7,6 +7,7 @@
 #include "hft/common/SystemOptimizations.hpp"
 #include "hft/monitoring/PerformanceMonitor.hpp"
 #include "hft/networking/FixProducer.hpp"
+#include "hft/networking/RxConsumerFactory.hpp"
 #include "hft/networking/RxRingConsumer.hpp"
 #include "hft/worker/FixWorker.hpp"
 
@@ -34,7 +35,7 @@ static void handle_signal(int signum) noexcept
  * @param argv Argument string vector (`<interface> <udp_port> <num_messages_or_fix_file> [pin_cores]`).
  * @return `EXIT_SUCCESS` or `EXIT_FAILURE`.
  */
-static void print_usage(const char* prog_name)
+static void print_usage(const char *prog_name)
 {
     cerr << "====================================================\n"
          << "  HFT FIX ENGINE & ZERO-COPY RX RING BYPASS\n"
@@ -55,7 +56,7 @@ static void print_usage(const char* prog_name)
          << "====================================================\n";
 }
 
-int main(int argc, char* argv[])
+int main(int argc, char *argv[])
 {
     for (int i = 1; i < argc; ++i)
     {
@@ -123,14 +124,14 @@ int main(int argc, char* argv[])
         catch (...)
         {
             cerr << "[Main] Error: third argument '" << source_param
-                << "' must be an existing file or integer count.\n";
+                 << "' must be an existing file or integer count.\n";
             return 1;
         }
     }
 
     const string target_ip = (interface_name == "lo") ? "127.0.0.1" : "239.255.0.1";
     const string log_filename = "fix_engine.log";
-    const string csv_filename = "metrics_time_series.csv";
+    const string csv_filename = "fix_metrics_time_series.csv";
 
     // Optional CPU core pinning assignments
     int cpu_count = hft::common::get_cpu_count();
@@ -140,9 +141,9 @@ int main(int argc, char* argv[])
     int monitor_cpu = (pin_cores && cpu_count >= 5) ? 4 : -1;
 
     // Shared zero-contention data structures allocated on 2MB huge pages
-    auto* shared_queue =
+    auto *shared_queue =
         hft::common::allocate_on_huge_pages<hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192>>();
-    auto* shared_telemetry = hft::common::allocate_on_huge_pages<hft::monitoring::TelemetryCounters>();
+    auto *shared_telemetry = hft::common::allocate_on_huge_pages<hft::monitoring::TelemetryCounters>();
 
     if (shared_queue == nullptr || shared_telemetry == nullptr)
     {
@@ -154,19 +155,19 @@ int main(int argc, char* argv[])
     hft::common::ConsoleLogger::getInstance().initialize(*shared_telemetry, total_messages);
 
     hft::common::log_info("[Main] Calibrated RDTSC CPU frequency: " + to_string(hft::common::g_cycles_per_ns) +
-        " cycles/ns");
+                          " cycles/ns");
 
     if (!fix_file_path.empty())
     {
         hft::common::log_info("[Main] Detected pre-generated FIX messages file '" + fix_file_path + "' containing " +
-            to_string(total_messages) + " messages.");
+                              to_string(total_messages) + " messages.");
     }
 
     hft::common::log_info("====================================================");
     hft::common::log_info("HFT C++20 FIX ENGINE & ZERO-COPY RX RING BYPASS");
     hft::common::log_info("Interface : " + interface_name + " | Port: " + to_string(target_port));
     hft::common::log_info("Target Msgs: " + to_string(total_messages) +
-        " | Core Pinning: " + (pin_cores ? "ENABLED" : "DISABLED"));
+                          " | Core Pinning: " + (pin_cores ? "ENABLED" : "DISABLED"));
     if (!fix_file_path.empty())
     {
         hft::common::log_info("Source File : " + fix_file_path);
@@ -176,16 +177,16 @@ int main(int argc, char* argv[])
 
     // Instantiate modular components
     hft::worker::FixWorker worker(*shared_queue, *shared_telemetry, log_filename, total_messages, worker_cpu);
-    hft::networking::PacketMmapRxConsumer consumer(interface_name, target_port, *shared_queue, *shared_telemetry,
-        consumer_cpu);
+    auto consumer = hft::networking::create_rx_consumer(interface_name, target_port, *shared_queue, *shared_telemetry,
+                                                        consumer_cpu);
     hft::networking::UdpFixProducer producer(interface_name, target_ip, target_port, total_messages, fix_file_path,
-        producer_cpu);
+                                             producer_cpu);
     hft::monitoring::CsvPerformanceMonitor monitor(*shared_telemetry, *shared_queue, csv_filename, 10, monitor_cpu);
 
     // Launch isolated threads (4 threads total)
     thread t_monitor([&monitor]() { monitor.run(); });
     thread t_worker([&worker]() { worker.run(); });
-    thread t_consumer([&consumer]() { consumer.run(); });
+    thread t_consumer([&consumer]() { consumer->run(); });
     thread t_producer([&producer]() { producer.run(); });
 
     // Join threads on completion or termination

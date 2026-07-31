@@ -3,26 +3,27 @@
  * @brief Capstone C++20 HFT Order Book Engine & Top-of-Book BBO Telemetry Executable.
  */
 
-#include "hft/common/Types.hpp"
+#include "hft/common/ConsoleLogger.hpp"
 #include "hft/common/SPSCQueue.hpp"
 #include "hft/common/SystemOptimizations.hpp"
-#include "hft/common/ConsoleLogger.hpp"
-#include "hft/protocol/ProtocolParser.hpp"
+#include "hft/common/Types.hpp"
+#include "hft/monitoring/PerformanceMonitor.hpp"
 #include "hft/networking/FixProducer.hpp"
+#include "hft/networking/RxConsumerFactory.hpp"
 #include "hft/networking/RxRingConsumer.hpp"
 #include "hft/order_book_engine/HftOrderBookEngine.hpp"
-#include "hft/monitoring/PerformanceMonitor.hpp"
+#include "hft/protocol/ProtocolParser.hpp"
 
+#include <algorithm>
+#include <chrono>
+#include <csignal>
+#include <filesystem>
+#include <format>
+#include <fstream>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
-#include <memory>
-#include <csignal>
-#include <format>
-#include <chrono>
-#include <algorithm>
-#include <filesystem>
-#include <fstream>
 
 using namespace std;
 using namespace hft::common;
@@ -38,7 +39,7 @@ static void handle_signal(int signum) noexcept
     }
 }
 
-static void print_usage(const char* prog_name)
+static void print_usage(const char *prog_name)
 {
     cout << "====================================================\n"
          << "  CAPSTONE C++20 HFT ORDER BOOK & BBO TELEMETRY ENGINE\n"
@@ -61,7 +62,7 @@ static void print_usage(const char* prog_name)
          << "====================================================\n";
 }
 
-int main(int argc, char* argv[])
+int main(int argc, char *argv[])
 {
     for (int i = 1; i < argc; ++i)
     {
@@ -97,9 +98,12 @@ int main(int argc, char* argv[])
     for (int i = 4; i < argc; ++i)
     {
         string arg = argv[i];
-        if (arg == "--direct-queue" || arg == "--in-memory") direct_queue_mode = true;
-        if (arg == "--pin-cores" || arg == "--pin") enable_core_pinning = true;
-        if (arg.starts_with("--protocol=")) explicit_protocol_arg = arg.substr(11);
+        if (arg == "--direct-queue" || arg == "--in-memory")
+            direct_queue_mode = true;
+        if (arg == "--pin-cores" || arg == "--pin")
+            enable_core_pinning = true;
+        if (arg.starts_with("--protocol="))
+            explicit_protocol_arg = arg.substr(11);
     }
 
     size_t total_messages = 0;
@@ -117,13 +121,23 @@ int main(int argc, char* argv[])
         {
             ifstream f(fix_file_path);
             string line;
-            while (getline(f, line)) { if (!line.empty()) ++total_messages; }
+            while (getline(f, line))
+            {
+                if (!line.empty())
+                    ++total_messages;
+            }
         }
     }
     else
     {
-        try { total_messages = static_cast<size_t>(stoul(source_param)); }
-        catch (...) { total_messages = 50000; }
+        try
+        {
+            total_messages = static_cast<size_t>(stoul(source_param));
+        }
+        catch (...)
+        {
+            total_messages = 50000;
+        }
     }
 
     ProtocolType protocol_type = parse_protocol_type(source_param);
@@ -132,6 +146,11 @@ int main(int argc, char* argv[])
         protocol_type = parse_protocol_type(explicit_protocol_arg);
     }
     string protocol_name = protocol_type_to_string(protocol_type);
+    string proto_prefix = "fix";
+    if (protocol_type == ProtocolType::OUCH)
+        proto_prefix = "ouch";
+    else if (protocol_type == ProtocolType::SBE)
+        proto_prefix = "sbe";
 
     string log_filename = std::format("{}_hft_order_book_engine.log", protocol_name);
     transform(log_filename.begin(), log_filename.end(), log_filename.begin(), ::tolower);
@@ -139,35 +158,36 @@ int main(int argc, char* argv[])
     log_filename.erase(remove(log_filename.begin(), log_filename.end(), '('), log_filename.end());
     log_filename.erase(remove(log_filename.begin(), log_filename.end(), ')'), log_filename.end());
 
-    string csv_filename = std::format("{}_order_book_metrics_time_series.csv", protocol_name);
-    transform(csv_filename.begin(), csv_filename.end(), csv_filename.begin(), ::tolower);
-    csv_filename.erase(remove(csv_filename.begin(), csv_filename.end(), ' '), csv_filename.end());
-    csv_filename.erase(remove(csv_filename.begin(), csv_filename.end(), '('), csv_filename.end());
-    csv_filename.erase(remove(csv_filename.begin(), csv_filename.end(), ')'), csv_filename.end());
+    string csv_filename = proto_prefix + "_metrics_time_series.csv";
 
     const string target_ip = (interface_name == "lo") ? "127.0.0.1" : "239.255.0.1";
-
-    cout << "====================================================\n";
-    cout << "  CAPSTONE C++20 HFT ORDER BOOK & BBO TELEMETRY     \n";
-    cout << std::format("Interface : {} | Port: {}\n", interface_name, udp_port);
-    cout << std::format("Protocol  : {}\n", protocol_name);
-    cout << std::format("Source    : {} ({} msgs)\n", source_param, total_messages);
-    cout << std::format("Execution : {}\n", direct_queue_mode ? "Direct In-Memory Queue (0% Loss)" : "Network Ring Socket");
-    cout << std::format("CSV File  : {}\n", csv_filename);
-    cout << std::format("Engine Log: {}\n", log_filename);
-    cout << "====================================================\n";
 
     hft::common::g_cycles_per_ns = hft::common::calibrate_rdtsc();
 
     // Shared Huge Page Queue & Telemetry
-    auto* shared_queue = hft::common::allocate_on_huge_pages<hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192>>();
-    auto* shared_telemetry = hft::common::allocate_on_huge_pages<hft::monitoring::TelemetryCounters>();
+    auto *shared_queue =
+        hft::common::allocate_on_huge_pages<hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192>>();
+    auto *shared_telemetry = hft::common::allocate_on_huge_pages<hft::monitoring::TelemetryCounters>();
 
     if (shared_queue == nullptr || shared_telemetry == nullptr)
     {
         cerr << "[Main] Fatal Error: Failed to allocate shared memory structures.\n";
         return EXIT_FAILURE;
     }
+
+    // Initialize async console logger with bottom progress bar
+    hft::common::ConsoleLogger::getInstance().initialize(*shared_telemetry, total_messages);
+
+    hft::common::log_info("====================================================");
+    hft::common::log_info("  CAPSTONE C++20 HFT ORDER BOOK & BBO TELEMETRY     ");
+    hft::common::log_info(std::format("Interface : {} | Port: {}", interface_name, udp_port));
+    hft::common::log_info(std::format("Protocol  : {}", protocol_name));
+    hft::common::log_info(std::format("Source    : {} ({} msgs)", source_param, total_messages));
+    hft::common::log_info(
+        std::format("Execution : {}", direct_queue_mode ? "Direct In-Memory Queue (0% Loss)" : "Network Ring Socket"));
+    hft::common::log_info(std::format("CSV File  : {}", csv_filename));
+    hft::common::log_info(std::format("Engine Log: {}", log_filename));
+    hft::common::log_info("====================================================");
 
     int cpu_count = hft::common::get_cpu_count();
     int worker_cpu = (enable_core_pinning && cpu_count >= 2) ? 1 : -1;
@@ -177,24 +197,33 @@ int main(int argc, char* argv[])
 
     // Instantiate modular components
     HftOrderBookEngine book_engine(*shared_queue, *shared_telemetry, protocol_type, worker_cpu, log_filename);
-    PacketMmapRxConsumer consumer(interface_name, udp_port, *shared_queue, *shared_telemetry, consumer_cpu);
-    UdpFixProducer producer(interface_name, target_ip, udp_port, total_messages, fix_file_path, producer_cpu, direct_queue_mode ? shared_queue : nullptr);
+    auto consumer =
+        hft::networking::create_rx_consumer(interface_name, udp_port, *shared_queue, *shared_telemetry, consumer_cpu);
+    UdpFixProducer producer(interface_name, target_ip, udp_port, total_messages, fix_file_path, producer_cpu,
+                            direct_queue_mode ? shared_queue : nullptr);
     hft::monitoring::CsvPerformanceMonitor monitor(*shared_telemetry, *shared_queue, csv_filename, 10, monitor_cpu);
 
     auto start_wall_time = chrono::high_resolution_clock::now();
 
     thread t_monitor([&monitor]() { monitor.run(); });
     thread t_worker([&book_engine]() { book_engine.run(); });
-    thread t_consumer([&consumer]() { consumer.run(); });
+    thread t_consumer([&consumer]() { consumer->run(); });
     thread t_producer([&producer]() { producer.run(); });
 
-    if (t_producer.joinable()) t_producer.join();
+    if (t_producer.joinable())
+        t_producer.join();
     g_consumer_done.store(true, memory_order_release);
-    if (t_consumer.joinable()) t_consumer.join();
-    if (t_worker.joinable()) t_worker.join();
+    if (t_consumer.joinable())
+        t_consumer.join();
+    if (t_worker.joinable())
+        t_worker.join();
 
     g_running.store(false, memory_order_release); // Stop monitor loop
-    if (t_monitor.joinable()) t_monitor.join();
+    if (t_monitor.joinable())
+        t_monitor.join();
+
+    // Shut down console logger cleanly before printing the final performance report
+    hft::common::ConsoleLogger::getInstance().shutdown();
 
     auto end_wall_time = chrono::high_resolution_clock::now();
     double total_execution_time_sec = chrono::duration<double>(end_wall_time - start_wall_time).count();
@@ -205,8 +234,10 @@ int main(int argc, char* argv[])
     uint64_t min_lat = shared_telemetry->worker.min_latency_ns.load(memory_order_relaxed);
     uint64_t max_lat = shared_telemetry->worker.max_latency_ns.load(memory_order_relaxed);
     uint64_t total_lat = shared_telemetry->worker.total_latency_ns.load(memory_order_relaxed);
-    double avg_lat = (total_processed > 0) ? (static_cast<double>(total_lat) / static_cast<double>(total_processed)) : 0.0;
-    double throughput = (total_execution_time_sec > 0) ? (static_cast<double>(total_processed) / total_execution_time_sec) : 0.0;
+    double avg_lat =
+        (total_processed > 0) ? (static_cast<double>(total_lat) / static_cast<double>(total_processed)) : 0.0;
+    double throughput =
+        (total_execution_time_sec > 0) ? (static_cast<double>(total_processed) / total_execution_time_sec) : 0.0;
 
     auto bbo = book_engine.get_top_of_book_snapshot();
 
@@ -214,8 +245,14 @@ int main(int argc, char* argv[])
     cout << "  CAPSTONE HFT ORDER BOOK PERFORMANCE & BBO REPORT  \n";
     cout << "====================================================\n";
     cout << std::format("Total Messages Ingested  : {}\n", total_processed);
-    cout << std::format("Risk Approved Orders     : {} ({:.1f}%)\n", total_approved, total_processed > 0 ? (static_cast<double>(total_approved) * 100.0 / static_cast<double>(total_processed)) : 0.0);
-    cout << std::format("Risk Rejected Orders     : {} ({:.1f}%)\n", total_rejected, total_processed > 0 ? (static_cast<double>(total_rejected) * 100.0 / static_cast<double>(total_processed)) : 0.0);
+    cout << std::format("Risk Approved Orders     : {} ({:.1f}%)\n", total_approved,
+                        total_processed > 0
+                            ? (static_cast<double>(total_approved) * 100.0 / static_cast<double>(total_processed))
+                            : 0.0);
+    cout << std::format("Risk Rejected Orders     : {} ({:.1f}%)\n", total_rejected,
+                        total_processed > 0
+                            ? (static_cast<double>(total_rejected) * 100.0 / static_cast<double>(total_processed))
+                            : 0.0);
     cout << std::format("Matched Trade Executions : {}\n", book_engine.total_trades());
     cout << std::format("Matched Shares Volume    : {} shares\n", book_engine.total_volume());
     cout << std::format("Total Execution Time     : {:.4f} seconds\n", total_execution_time_sec);
@@ -226,8 +263,10 @@ int main(int argc, char* argv[])
     cout << "----------------------------------------------------\n";
     cout << "        TOP-OF-BOOK (BBO) PRICE LADDER DECK         \n";
     cout << "----------------------------------------------------\n";
-    cout << std::format("  Best Bid Price (L1)    : ${:.2f} (Qty: {})\n", static_cast<double>(bbo.best_bid_price) / 1e6, bbo.best_bid_qty);
-    cout << std::format("  Best Ask Price (L1)    : ${:.2f} (Qty: {})\n", static_cast<double>(bbo.best_ask_price) / 1e6, bbo.best_ask_qty);
+    cout << std::format("  Best Bid Price (L1)    : ${:.2f} (Qty: {})\n", static_cast<double>(bbo.best_bid_price) / 1e6,
+                        bbo.best_bid_qty);
+    cout << std::format("  Best Ask Price (L1)    : ${:.2f} (Qty: {})\n", static_cast<double>(bbo.best_ask_price) / 1e6,
+                        bbo.best_ask_qty);
     cout << std::format("  Top-of-Book Bid/Ask Spread: ${:.2f}\n", static_cast<double>(bbo.spread_price) / 1e6);
     cout << "----------------------------------------------------\n";
     cout << "           L1 - L5 PRICE DEPTH DECK                 \n";
@@ -235,21 +274,24 @@ int main(int argc, char* argv[])
     cout << "  [ASKS]\n";
     for (int i = static_cast<int>(bbo.ask_levels_count) - 1; i >= 0; --i)
     {
-        cout << std::format("    Ask L{} : ${:.2f} | Qty: {} | Orders: {}\n",
-            i + 1, static_cast<double>(bbo.ask_depth[i].price) / 1e6, bbo.ask_depth[i].qty, bbo.ask_depth[i].order_count);
+        cout << std::format("    Ask L{} : ${:.2f} | Qty: {} | Orders: {}\n", i + 1,
+                            static_cast<double>(bbo.ask_depth[i].price) / 1e6, bbo.ask_depth[i].qty,
+                            bbo.ask_depth[i].order_count);
     }
     cout << "  --------------------------------------------------\n";
     cout << "  [BIDS]\n";
     for (size_t i = 0; i < bbo.bid_levels_count; ++i)
     {
-        cout << std::format("    Bid L{} : ${:.2f} | Qty: {} | Orders: {}\n",
-            i + 1, static_cast<double>(bbo.bid_depth[i].price) / 1e6, bbo.bid_depth[i].qty, bbo.bid_depth[i].order_count);
+        cout << std::format("    Bid L{} : ${:.2f} | Qty: {} | Orders: {}\n", i + 1,
+                            static_cast<double>(bbo.bid_depth[i].price) / 1e6, bbo.bid_depth[i].qty,
+                            bbo.bid_depth[i].order_count);
     }
     cout << "====================================================\n";
 
     hft::common::deallocate_huge_pages(shared_queue);
     hft::common::deallocate_huge_pages(shared_telemetry);
 
-    cout << std::format("\n[main] Capstone HFT Order Book Engine cleanly shut down. Log output written to: {}\n", log_filename);
+    cout << std::format("\n[main] Capstone HFT Order Book Engine cleanly shut down. Log output written to: {}\n",
+                        log_filename);
     return 0;
 }

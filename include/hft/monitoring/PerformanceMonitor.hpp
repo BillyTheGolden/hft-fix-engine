@@ -50,8 +50,8 @@ namespace hft::monitoring
          */
         CsvPerformanceMonitor(const TelemetryCounters &telemetry,
                               const hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192> &queue,
-                              std::string csv_filename = "metrics_time_series.csv", uint32_t sample_interval_ms = 10,
-                              int cpu_pin = -1);
+                              std::string csv_filename = "fix_metrics_time_series.csv",
+                              uint32_t sample_interval_ms = 10, int cpu_pin = -1);
 
         ~CsvPerformanceMonitor() override = default;
 

@@ -19,12 +19,11 @@ namespace hft::networking
     using namespace std;
 
     PacketMmapRxConsumer::PacketMmapRxConsumer(string interface_name, uint16_t filter_port,
-                                               hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192> &queue,
-                                               hft::monitoring::TelemetryCounters &telemetry, int cpu_pin)
+        hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192>& queue,
+        hft::monitoring::TelemetryCounters& telemetry, int cpu_pin)
         : m_interface_name(std::move(interface_name)), m_filter_port(filter_port), m_queue(queue),
-          m_telemetry(telemetry), m_cpu_pin(cpu_pin)
-    {
-    }
+        m_telemetry(telemetry), m_cpu_pin(cpu_pin)
+    {}
 
     PacketMmapRxConsumer::~PacketMmapRxConsumer()
     {
@@ -72,7 +71,7 @@ namespace hft::networking
             int reuse = 1;
             setsockopt(m_sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 
-            struct sockaddr_in sin{};
+            struct sockaddr_in sin {};
             sin.sin_family = AF_INET;
             sin.sin_port = filter_port_nbo;
             sin.sin_addr.s_addr = INADDR_ANY;
@@ -80,7 +79,7 @@ namespace hft::networking
             int rcvbuf = 33554432; // 32 MB socket receive buffer
             setsockopt(m_sockfd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
 
-            if (bind(m_sockfd, reinterpret_cast<struct sockaddr *>(&sin), sizeof(sin)) < 0)
+            if (bind(m_sockfd, reinterpret_cast<struct sockaddr*>(&sin), sizeof(sin)) < 0)
             {
                 hft::common::log_error("[RxRingConsumer] Fatal Error: UDP socket bind() failed.");
                 cleanup();
@@ -98,19 +97,19 @@ namespace hft::networking
             if (if_index == 0)
             {
                 hft::common::log_error("[RxRingConsumer] Fatal Error: Network interface '" + m_interface_name +
-                                       "' not found.");
+                    "' not found.");
                 cleanup();
                 hft::common::g_running.store(false, memory_order_release);
                 return;
             }
 
-            struct sockaddr_ll sll{};
+            struct sockaddr_ll sll {};
             memset(&sll, 0, sizeof(sll));
             sll.sll_family = AF_PACKET;
             sll.sll_protocol = htons(ETH_P_ALL);
             sll.sll_ifindex = static_cast<int>(if_index);
 
-            if (bind(m_sockfd, reinterpret_cast<struct sockaddr *>(&sll), sizeof(sll)) < 0)
+            if (bind(m_sockfd, reinterpret_cast<struct sockaddr*>(&sll), sizeof(sll)) < 0)
             {
                 hft::common::log_error("[RxRingConsumer] Fatal Error: bind() to interface failed.");
                 cleanup();
@@ -118,7 +117,7 @@ namespace hft::networking
                 return;
             }
 
-            struct packet_mreq mr{};
+            struct packet_mreq mr {};
             memset(&mr, 0, sizeof(mr));
             mr.mr_ifindex = static_cast<int>(if_index);
             mr.mr_type = PACKET_MR_ALLMULTI;
@@ -142,7 +141,7 @@ namespace hft::networking
                 return;
             }
 
-            struct tpacket_req req{};
+            struct tpacket_req req {};
             memset(&req, 0, sizeof(req));
             req.tp_block_size = static_cast<unsigned int>(hft::common::BLOCK_SIZE);
             req.tp_block_nr = static_cast<unsigned int>(hft::common::BLOCK_NR);
@@ -158,7 +157,7 @@ namespace hft::networking
             }
 
             m_total_ring_size = static_cast<size_t>(req.tp_block_size) * req.tp_block_nr;
-            m_mapped_buffer = static_cast<uint8_t *>(
+            m_mapped_buffer = static_cast<uint8_t*>(
                 mmap(nullptr, m_total_ring_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_LOCKED, m_sockfd, 0));
             if (m_mapped_buffer == MAP_FAILED)
             {
@@ -173,7 +172,7 @@ namespace hft::networking
                 " MB kernel ring buffer via DMA Zero-Copy! Monitoring UDP port " + std::to_string(m_filter_port));
         }
 
-        struct pollfd pfd{.fd = m_sockfd, .events = POLLIN, .revents = 0};
+        struct pollfd pfd { .fd = m_sockfd, .events = POLLIN, .revents = 0 };
 
         uint32_t frame_idx = 0;
         size_t rx_count = 0;
@@ -187,7 +186,7 @@ namespace hft::networking
             {
                 static char udp_ring[8192][512];
                 static uint32_t udp_slot = 0;
-                char *current_buf = udp_ring[udp_slot];
+                char* current_buf = udp_ring[udp_slot];
                 ssize_t n = recv(m_sockfd, current_buf, 512, MSG_DONTWAIT);
                 if (n > 0)
                 {
@@ -215,8 +214,8 @@ namespace hft::networking
                 continue;
             }
 
-            auto *hdr =
-                reinterpret_cast<struct tpacket2_hdr *>(m_mapped_buffer + (frame_idx * hft::common::FRAME_SIZE));
+            auto* hdr =
+                reinterpret_cast<struct tpacket2_hdr*>(m_mapped_buffer + (frame_idx * hft::common::FRAME_SIZE));
 
             if ((hdr->tp_status & TP_STATUS_USER) == 0)
             {
@@ -254,30 +253,30 @@ namespace hft::networking
             spin_count = 0; // Reset backoff counter when a packet is ready
             empty_checks = 0;
             uint64_t rx_ts = hft::common::rdtsc();
-            uint8_t *raw_frame = reinterpret_cast<uint8_t *>(hdr) + hdr->tp_mac;
+            uint8_t* raw_frame = reinterpret_cast<uint8_t*>(hdr) + hdr->tp_mac;
             bool pushed = false;
 
             // Manual Layer-2/3/4 header stripping
-            auto *eth = reinterpret_cast<struct ethhdr *>(raw_frame);
+            auto* eth = reinterpret_cast<struct ethhdr*>(raw_frame);
             if (eth->h_proto == eth_p_ip_nbo)
             {
-                auto *ip = reinterpret_cast<struct iphdr *>(raw_frame + sizeof(struct ethhdr));
+                auto* ip = reinterpret_cast<struct iphdr*>(raw_frame + sizeof(struct ethhdr));
                 if (ip->protocol == IPPROTO_UDP)
                 {
                     uint32_t ip_hdr_len = ip->ihl * 4;
-                    auto *udp = reinterpret_cast<struct udphdr *>(raw_frame + sizeof(struct ethhdr) + ip_hdr_len);
+                    auto* udp = reinterpret_cast<struct udphdr*>(raw_frame + sizeof(struct ethhdr) + ip_hdr_len);
 
                     if (udp->dest == filter_port_nbo)
                     {
-                        uint8_t *payload = reinterpret_cast<uint8_t *>(udp) + sizeof(struct udphdr);
+                        uint8_t* payload = reinterpret_cast<uint8_t*>(udp) + sizeof(struct udphdr);
                         uint32_t payload_len = static_cast<uint32_t>(ntohs(udp->len) - sizeof(struct udphdr));
 
-                        if (payload_len > 0 && payload_len <= hft::common::MAX_FIX_LEN)
+                        if (payload_len > 0 && payload_len <= hft::common::MAX_PAYLOAD_LEN)
                         {
                             hft::common::FixMessagePacket pkt;
                             pkt.rx_timestamp_cycles = rx_ts;
                             pkt.payload_len = payload_len;
-                            pkt.payload = reinterpret_cast<char *>(payload);
+                            pkt.payload = reinterpret_cast<char*>(payload);
                             pkt.ring_hdr = hdr;
 
                             // Push zero-allocation packet to SPSC queue
@@ -302,7 +301,7 @@ namespace hft::networking
         }
 
         hft::common::log_info("[RxRingConsumer] Loop finished. Total frames captured and queued: " +
-                              std::to_string(rx_count));
+            std::to_string(rx_count));
         cleanup();
         hft::common::g_consumer_done.store(true, memory_order_release);
     }

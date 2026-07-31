@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project implements a **modular, low-latency Multi-Protocol Trading Engine & Order Matching System** in modern **C++20**. It demonstrates zero-copy packet processing, zero-allocation multi-protocol decoding (**FIX 4.2 ASCII, Nasdaq OUCH 5.0 Binary, and CME SBE iLink 3 Binary**), kernel bypass using Linux **`AF_PACKET` with `PACKET_MMAP` (128 MB `tpacket_v2` DMA ring buffer with 65,536 slots)**, pre-trade risk validation gates, a Price-Time Priority Limit Order Matching Engine, and an ultra-fast **Lock-Free Single Producer Single Consumer (SPSC) Queue**.
+This project implements a **modular, low-latency Multi-Protocol Trading Engine & Order Matching System** in modern **C++20**. It demonstrates zero-copy packet processing, zero-allocation multi-protocol decoding (**FIX 4.2 ASCII, Nasdaq OUCH 5.0 Binary, and CME SBE iLink 3 Binary**), kernel bypass using Linux **`AF_PACKET` with `PACKET_MMAP` (128 MB `tpacket_v2` DMA ring buffer with 65,536 slots)** and **Linux eBPF / AF_XDP (XDP Sockets)**, pre-trade risk validation gates, a Price-Time Priority Limit Order Matching Engine, an ultra-fast **Lock-Free Single Producer Single Consumer (SPSC) Queue**, and a real-time terminal user interface with a live progress bar.
 
 The architecture adheres strictly to **SOLID design principles**, **Clean Code practices**, and **modern C++ concurrency paradigms** (`std::atomic`, `std::thread`, `std::format`, C++20 concepts, cache-line alignment `alignas(64)`, and zero-heap-allocation hot path execution).
 
@@ -16,7 +16,7 @@ The engine is partitioned into decoupled subsystems:
 +-----------------------------------------------------------------------------+
 |                                 hft::common                                 |
 |  +---------------------+  +---------------------+  +---------------------+  |
-|  |     Types.hpp       |  |    SPSCQueue.hpp    |  |  SystemOptim.hpp    |  |
+|  |     Types.hpp       |  |    SPSCQueue.hpp    |  |  ConsoleLogger.hpp  |  |
 |  +---------------------+  +---------------------+  +---------------------+  |
 +-----------------------------------------------------------------------------+
        ^                           ^                           ^
@@ -36,7 +36,8 @@ The engine is partitioned into decoupled subsystems:
 
 ### 1. Common Subsystem (`include/hft/common/`)
 * **`Types.hpp`**: Core structures including `FixMessagePacket` (cache-aligned zero-allocation container storing cycle counts `rx_timestamp_cycles`), CPU cycle frequency `g_cycles_per_ns`, inline `rdtsc()` reader, and 128 MB DMA ring buffer constants (`BLOCK_SIZE = 4MB`, `BLOCK_NR = 32`, `FRAME_NR = 65,536`).
-* **`SPSCQueue.hpp`**: Lock-free, wait-free Single Producer Single Consumer circular queue with cached read/write indices (`m_cached_read_pos`, `m_cached_write_pos`), vectorized batch operations (`pop_batch`, `push_batch`), and `alignas(64)` cache-line isolation.
+* **`SPSCQueue.hpp`**: Lock-free, wait-free Single Producer Single Consumer circular queue with cached read/write indices (`m_cached_read_pos`, `m_cached_write_pos`), vectorized batch operations (`pop_batch`, `push_batch`), and `alignas(64)` cache-line isolation. Used for both primary packet enqueuing (`shared_queue`) and engine disk logging queues (`m_log_queue`), eliminating mutex lock contention from the hot path.
+* **`ConsoleLogger.hpp` & `ConsoleLogger.cpp`**: Asynchronous singleton console logger managing terminal output cleanly with a live, fixed-bottom cyan progress bar (`[=======>  ] 45.2% (45200/100000)`).
 * **`SystemOptimizations.hpp`**: Thread affinity wrappers (`pthread_setaffinity_np`, `std::thread::native_handle`), NUMA node placement, `SCHED_FIFO` real-time scheduling, and 2MB Huge Page memory allocation (`mmap` with `MAP_HUGETLB`).
 
 ### 2. Multi-Protocol Subsystem (`include/hft/protocol/`)
@@ -47,8 +48,13 @@ The engine is partitioned into decoupled subsystems:
 * **`ParsedOrder.hpp`**: Domain model storing price as 64-bit fixed-point integer (`int64_t`) scaled by $1,000,000$ (micro-dollar precision) to avoid floating-point errors.
 
 ### 3. Networking Subsystem (`include/hft/networking/`)
-* **`FixProducer.hpp` & `FixProducer.cpp`**: Multi-protocol UDP message injector (`UdpFixProducer`). Supports loading text (`.txt`) or binary (`.data`) files into an `m_loaded_messages` vector. Features both **Network UDP Socket Mode** (with adaptive 10us micro-pacing) and **Direct In-Memory Queue Mode** (`--direct-queue`) for 100% loss-free benchmarking.
-* **`RxRingConsumer.hpp` & `RxRingConsumer.cpp`**: Zero-copy packet capture engine (`PacketMmapRxConsumer`). Binds Layer-2 raw sockets (`AF_PACKET`), memory-maps kernel ring DMA (`PACKET_RX_RING`), and features a circular payload ring buffer (`udp_ring[8192][512]`) for fallback UDP socket operations.
+* **`AfXdpRxConsumer.hpp` & `AfXdpRxConsumer.cpp`**: Ultra-low-latency eBPF / AF_XDP (XDP Sockets) receiver. Allocates a continuous UMEM ring buffer via page-aligned `mmap`. Attempts **Native Hardware Zero-Copy Mode (`XDP_FLAGS_DRV_MODE`)** first, and automatically falls back to **Generic SKB Mode (`XDP_FLAGS_SKB_MODE`)** if the NIC driver does not support native driver hooks.
+* **`RxConsumerFactory.hpp`**: Unified factory function (`create_rx_consumer`) creating an optimal receiver with intelligent multi-queue fallback:
+  1. **AF_XDP Native Zero-Copy Mode (`XDP_ZEROCOPY` / `XDP_FLAGS_DRV_MODE`)**
+  2. **PACKET_MMAP Raw Layer-2 Socket (`AF_PACKET` + `tpacket_v2` + `PACKET_MR_ALLMULTI`)**: Automatically selected when AF_XDP is in SKB mode on physical multi-queue NICs (`enp4s0`), guaranteeing 100% multicast UDP packet capture across all hardware RX queues.
+  3. **Standard UDP Socket (`AF_INET` / `SOCK_DGRAM`)**
+* **`FixProducer.hpp` & `FixProducer.cpp`**: Multi-protocol message injector (`UdpFixProducer`). Supports loading text (`.txt`) or binary (`.data`) files into memory. Features both **Network UDP Socket Mode** and **Direct In-Memory Queue Mode** (`--direct-queue`) for 100% loss-free benchmarking via `SPSCQueue`.
+* **`RxRingConsumer.hpp` & `RxRingConsumer.cpp`**: PACKET_MMAP packet capture engine (`PacketMmapRxConsumer`). Binds Layer-2 raw sockets (`AF_PACKET`), memory-maps kernel ring DMA (`PACKET_RX_RING`), and features a circular payload ring buffer for fallback UDP socket operations.
 
 ### 4. Capstone C++20 Order Book Subsystem (`include/hft/order_book_engine/` & `include/hft/matching/ZeroAllocHftOrderBook.hpp`)
 * **`ZeroAllocHftOrderBook.hpp`**: Capstone Limit Order Book unifying all project low-latency techniques:
@@ -56,11 +62,11 @@ The engine is partitioned into decoupled subsystems:
   * **64-bit Fixed-Point Arithmetic**: Micro-dollar precision ($1,000,000$ scaling).
   * **Cache Alignment**: `alignas(64)` memory padding preventing cross-core L1/L2 cache line false sharing.
   * **Top-of-Book (BBO) & Depth**: Full L1–L5 Price Depth Deck reporting for Bids and Asks.
-* **`HftOrderBookEngine.hpp` & `HftOrderBookEngine.cpp`**: Core worker thread integrating `ZeroAllocHftOrderBook`, inline `PreTradeRiskManager`, `SequenceGapDetector`, and `FeedArbitrator`. Uses C++20 concepts (`template <typename T> concept ValidPacketType`) and `std::format` string formatting.
+* **`HftOrderBookEngine.hpp` & `HftOrderBookEngine.cpp`**: Core worker thread integrating `ZeroAllocHftOrderBook`, inline `PreTradeRiskManager`, `SequenceGapDetector`, and `FeedArbitrator`. Uses lock-free `SPSCQueue` for disk logging, C++20 concepts (`template <typename T> concept ValidPacketType`), and `std::format` string formatting.
 
 ### 5. Monitoring & Telemetry Subsystem (`include/hft/monitoring/`)
 * **`Telemetry.hpp`**: Cache-line aligned (`alignas(64)`) atomic telemetry counters (`TelemetryCounters`) storing captured frames, processed messages, **risk-approved order count**, **risk-rejected order count**, and accumulators for **approved order average latency** and **rejected order average latency**.
-* **`PerformanceMonitor.hpp` & `PerformanceMonitor.cpp`**: Background monitoring thread (`CsvPerformanceMonitor`) that records 10 ms time-series metrics into protocol-prefixed CSV files (`<protocol_name>_matching_metrics_time_series.csv`).
+* **`PerformanceMonitor.hpp` & `PerformanceMonitor.cpp`**: Background monitoring thread (`CsvPerformanceMonitor`) recording 10 ms time-series metrics into standardized protocol-prefixed CSV files (`<used_protocol>_metrics_time_series.csv`).).
 
 ---
 
@@ -82,9 +88,11 @@ Interface : lo | Port: 8888
 Protocol  : SBE (CME iLink 3 Binary)
 Source    : test_book_sbe_50k.data (50000 msgs)
 Execution : Direct In-Memory Queue (0% Loss)
-CSV File  : sbecmeilink3binary_order_book_metrics_time_series.csv
+CSV File  : sbe_metrics_time_series.csv
 Engine Log: sbecmeilink3binary_hft_order_book_engine.log
 ====================================================
+--------------------------------------------------------------------------------
+[=========================================================>] 100.0% (50000/50000)
 
 ====================================================
   CAPSTONE HFT ORDER BOOK PERFORMANCE & BBO REPORT  
@@ -165,18 +173,24 @@ The system includes an automated **Multi-Protocol Performance Comparison Arena**
 
 ## 📊 Performance Telemetry & Risk Validation Visualization
 
-We provide Python scripts to analyze time-series telemetry CSV files and generate performance charts:
+We provide Python scripts to analyze standardized time-series telemetry CSV files (`<used_protocol>_metrics_time_series.csv`) and generate performance charts:
 
 ### 1. Order Book Performance Plotter (`scripts/plot_order_book_performance.py`)
 ```bash
 # Generate 4-panel Order Book Telemetry & BBO Depth Chart
-python3 scripts/plot_order_book_performance.py sbecmeilink3binary_order_book_metrics_time_series.csv
+python3 scripts/plot_order_book_performance.py sbe_metrics_time_series.csv
 ```
 
 ### 2. Static Telemetry Plotter (`scripts/plot_performance.py`)
 ```bash
 # Generate high-resolution 4-panel telemetry PNG chart and Pandas summary
-python3 scripts/plot_performance.py --csv sbe_matching_metrics_time_series.csv --out sbe_performance_chart.png
+python3 scripts/plot_performance.py --csv sbe_metrics_time_series.csv --out sbe_performance_chart.png
+```
+
+### 3. Interactive Plotly Dashboard (`scripts/plot_interactive.py`)
+```bash
+# Generate interactive Plotly HTML dashboard opening in browser
+python3 scripts/plot_interactive.py --csv fix_metrics_time_series.csv --out hft_performance_interactive.html
 ```
 
 ---
@@ -211,12 +225,18 @@ The project includes an automated **Resilience Test Arena** executable (`./bin/t
 ### Compilation Steps:
 ```bash
 mkdir -p build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_NUMA=OFF ..
+# Compile with AF_XDP enabled (Default: HFT_ENABLE_AF_XDP=ON)
+cmake -DCMAKE_BUILD_TYPE=Release -DHFT_ENABLE_AF_XDP=ON -DENABLE_NUMA=ON ..
 cmake --build . -j$(nproc)
+
+# Generate HTML Doxygen API documentation
+cmake --build . --target doc
 ```
 
 Generated executables in `./bin/`:
+- `hft_fix_engine`: Main HFT Engine with AF_XDP Zero-Copy / SKB Mode and PACKET_MMAP Fallback.
 - `hft_order_book_engine`: Capstone C++20 Order Book Engine with BBO Telemetry & L1-L5 Depth.
 - `hft_matching_engine`: Order Matching Engine with Multi-Protocol support.
 - `protocol_arena`: Multi-Protocol performance benchmark arena (FIX vs OUCH vs SBE).
 - `test_arena`: 7-Scenario Resilience Test Arena.
+- `hackerrank_gtest`: Automated Google Test / Google Mock suite.

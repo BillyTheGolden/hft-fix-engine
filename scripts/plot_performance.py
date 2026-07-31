@@ -137,7 +137,7 @@ def plot_telemetry(csv_path: str, output_image: str, show_plot: bool = False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Plot HFT FIX Engine telemetry time-series using Pandas.")
-    parser.add_argument("--csv", default="metrics_time_series.csv", help="Path to input telemetry CSV file.")
+    parser.add_argument("--csv", default="fix_metrics_time_series.csv", help="Path to input telemetry CSV file.")
     parser.add_argument("--out", default="hft_performance_charts.png", help="Path for output PNG chart image.")
     parser.add_argument("--show", action="store_true", help="Display the plot on screen interactively.")
     args = parser.parse_args()

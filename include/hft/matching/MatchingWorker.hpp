@@ -5,18 +5,18 @@
 
 #pragma once
 
-#include "hft/common/SPSCQueue.hpp"
-#include "hft/common/MpscQueue.hpp"
-#include "hft/common/Types.hpp"
-#include "hft/monitoring/Telemetry.hpp"
-#include "hft/protocol/ProtocolParser.hpp"
-#include "hft/protocol/SequenceGapDetector.hpp"
-#include "hft/protocol/SequenceReorderBuffer.hpp"
 #include "hft/common/ClockSynchronizer.hpp"
+#include "hft/common/MpscQueue.hpp"
+#include "hft/common/SPSCQueue.hpp"
+#include "hft/common/Types.hpp"
+#include "hft/matching/MatchingEngine.hpp"
+#include "hft/monitoring/Telemetry.hpp"
 #include "hft/networking/FeedArbitrator.hpp"
 #include "hft/protocol/OrderBookRecoveryManager.hpp"
 #include "hft/protocol/PreTradeRiskManager.hpp"
-#include "hft/matching/MatchingEngine.hpp"
+#include "hft/protocol/ProtocolParser.hpp"
+#include "hft/protocol/SequenceGapDetector.hpp"
+#include "hft/protocol/SequenceReorderBuffer.hpp"
 
 #include <atomic>
 #include <memory>
@@ -35,30 +35,36 @@ namespace hft::matching
      */
     class MatchingWorker
     {
-    public:
-        MatchingWorker(FixMessagePacktQueue& queue,
-                       hft::monitoring::TelemetryCounters& telemetry,
-                       std::string log_filename,
-                       size_t expected_messages,
-                       hft::protocol::ProtocolType protocol_type = hft::protocol::ProtocolType::FIX,
-                       int cpu_pin = -1);
+      public:
+        MatchingWorker(FixMessagePacktQueue &queue, hft::monitoring::TelemetryCounters &telemetry,
+                       std::string log_filename, size_t expected_messages,
+                       hft::protocol::ProtocolType protocol_type = hft::protocol::ProtocolType::FIX, int cpu_pin = -1);
 
         ~MatchingWorker();
 
-        MatchingWorker(const MatchingWorker&) = delete;
-        MatchingWorker& operator=(const MatchingWorker&) = delete;
+        MatchingWorker(const MatchingWorker &) = delete;
+        MatchingWorker &operator=(const MatchingWorker &) = delete;
 
         void run();
 
-        [[nodiscard]] uint64_t total_trades() const noexcept { return m_matching_engine.total_trades(); }
-        [[nodiscard]] uint64_t total_volume() const noexcept { return m_matching_engine.total_volume(); }
-        [[nodiscard]] uint64_t risk_rejected_count() const noexcept { return m_risk_mgr.rejected_count(); }
+        [[nodiscard]] uint64_t total_trades() const noexcept
+        {
+            return m_matching_engine.total_trades();
+        }
+        [[nodiscard]] uint64_t total_volume() const noexcept
+        {
+            return m_matching_engine.total_volume();
+        }
+        [[nodiscard]] uint64_t risk_rejected_count() const noexcept
+        {
+            return m_risk_mgr.rejected_count();
+        }
 
-    private:
+      private:
         void run_logging_loop();
 
-        FixMessagePacktQueue& m_queue;
-        hft::monitoring::TelemetryCounters& m_telemetry;
+        FixMessagePacktQueue &m_queue;
+        hft::monitoring::TelemetryCounters &m_telemetry;
         std::string m_log_filename;
         size_t m_expected_messages;
         hft::protocol::ProtocolType m_protocol_type;
@@ -74,7 +80,8 @@ namespace hft::matching
         MatchingEngine m_matching_engine;
 
         // Asynchronous Logging Subsystem
-        hft::common::MpscQueue<hft::common::LogMessage> m_log_queue;
+        using LogMessageQueue = hft::common::SPSCQueue<hft::common::LogMessage, 16384>;
+        LogMessageQueue m_log_queue;
         std::atomic<bool> m_logging_running{true};
         std::thread m_logging_thread;
     };

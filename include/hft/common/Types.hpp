@@ -38,9 +38,9 @@ namespace hft::common
     inline constexpr size_t FRAME_NR = (BLOCK_SIZE * BLOCK_NR) / FRAME_SIZE;
 
     /**
-     * @brief Maximum byte length of a single FIX protocol message payload.
+     * @brief Maximum byte length of a message protocol payload length.
      */
-    inline constexpr size_t MAX_FIX_LEN = 512;
+    inline constexpr size_t MAX_PAYLOAD_LEN = 512;
 
     /**
      * @brief Global execution flag to coordinate graceful shutdown across all active threads.
@@ -65,16 +65,16 @@ namespace hft::common
     struct alignas(64) FixMessagePacket
     {
         /** @brief CPU cycle count recorded exactly when the frame was read from the kernel ring. */
-        uint64_t rx_timestamp_cycles{0};
+        uint64_t rx_timestamp_cycles{ 0 };
 
         /** @brief Number of valid bytes in the payload. */
-        uint32_t payload_len{0};
+        uint32_t payload_len{ 0 };
 
         /** @brief Pointer to the raw payload inside the memory-mapped ring buffer. */
-        char *payload{nullptr};
+        char* payload{ nullptr };
 
         /** @brief Opaque pointer to the ring frame header (tpacket2_hdr) to allow deferred release. */
-        void *ring_hdr{nullptr};
+        void* ring_hdr{ nullptr };
 
         /**
          * @brief Default constructor zero-initializing all packet fields.
@@ -89,7 +89,7 @@ namespace hft::common
      */
     [[nodiscard]] inline uint64_t get_timestamp_ns() noexcept
     {
-        struct timespec ts{};
+        struct timespec ts {};
         clock_gettime(CLOCK_MONOTONIC, &ts);
         return static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL + static_cast<uint64_t>(ts.tv_nsec);
     }
@@ -170,8 +170,8 @@ namespace hft::common
      */
     struct alignas(64) LogMessage
     {
-        uint64_t timestamp_ns{0};
-        LogCategory category{LogCategory::INFO_LEVEL};
+        uint64_t timestamp_ns{ 0 };
+        LogCategory category{ LogCategory::INFO_LEVEL };
         char message[256]{};
 
         constexpr LogMessage() noexcept = default;
@@ -193,7 +193,7 @@ namespace hft::common
      */
     struct alignas(64) ConsoleMessage
     {
-        ConsoleCategory category{ConsoleCategory::INFO_MSG};
+        ConsoleCategory category{ ConsoleCategory::INFO_MSG };
         char message[256]{};
 
         constexpr ConsoleMessage() noexcept = default;

@@ -19,22 +19,21 @@ namespace hft::common
      * @brief A simple thread-safe queue designed for multi-producer, single-consumer communication.
      * @tparam T The element type stored in the queue.
      */
-    template <typename T>
-    class MpscQueue
+    template <typename T> class MpscQueue
     {
-    public:
+      public:
         MpscQueue() = default;
         ~MpscQueue() = default;
 
         // Delete copy constructor and assignment operator
-        MpscQueue(const MpscQueue&) = delete;
-        MpscQueue& operator=(const MpscQueue&) = delete;
+        MpscQueue(const MpscQueue &) = delete;
+        MpscQueue &operator=(const MpscQueue &) = delete;
 
         /**
          * @brief Pushes a new item into the queue (blocking/guaranteed write).
          * @param item Const reference to the item.
          */
-        void push(const T& item)
+        void push(const T &item)
         {
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
@@ -47,7 +46,7 @@ namespace hft::common
          * @brief Pushes a new item using move semantics.
          * @param item Rvalue reference to the item.
          */
-        void push(T&& item)
+        void push(T &&item)
         {
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
@@ -61,7 +60,7 @@ namespace hft::common
          * @param item Const reference to the item.
          * @return `true` if the push succeeded (lock was acquired), `false` otherwise.
          */
-        bool try_push(const T& item)
+        bool try_push(const T &item)
         {
             std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
             if (!lock.owns_lock())
@@ -78,7 +77,7 @@ namespace hft::common
          * @param item Rvalue reference to the item.
          * @return `true` if succeeded, `false` otherwise.
          */
-        bool try_push(T&& item)
+        bool try_push(T &&item)
         {
             std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
             if (!lock.owns_lock())
@@ -96,7 +95,7 @@ namespace hft::common
          * @param running Atomic flag indicating if the consumer thread should keep running.
          * @return `true` if an item was popped; `false` if the queue is empty and running is false.
          */
-        bool pop(T& item, std::atomic<bool>& running)
+        bool pop(T &item, std::atomic<bool> &running)
         {
             std::unique_lock<std::mutex> lock(m_mutex);
             m_cv.wait(lock, [this, &running] { return !m_queue.empty() || !running.load(std::memory_order_relaxed); });
@@ -118,11 +117,11 @@ namespace hft::common
          * @param timeout_ms Timeout duration in milliseconds.
          * @return `true` if an item was popped; `false` if timeout expired or queue is empty and running is false.
          */
-        bool pop_with_timeout(T& item, std::atomic<bool>& running, int timeout_ms)
+        bool pop_with_timeout(T &item, std::atomic<bool> &running, int timeout_ms)
         {
             std::unique_lock<std::mutex> lock(m_mutex);
             m_cv.wait_for(lock, std::chrono::milliseconds(timeout_ms),
-                [this, &running] { return !m_queue.empty() || !running.load(std::memory_order_relaxed); });
+                          [this, &running] { return !m_queue.empty() || !running.load(std::memory_order_relaxed); });
 
             if (m_queue.empty())
             {
@@ -139,7 +138,7 @@ namespace hft::common
          * @param item Reference where the popped item is copied.
          * @return `true` if an item was popped; `false` if the queue is empty.
          */
-        bool try_pop(T& item)
+        bool try_pop(T &item)
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             if (m_queue.empty())
@@ -172,7 +171,16 @@ namespace hft::common
             return m_queue.size();
         }
 
-    private:
+        /**
+         * @brief Notifies all waiting threads on the condition variable.
+         */
+        void notify_all()
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_cv.notify_all();
+        }
+
+      private:
         std::queue<T> m_queue;
         mutable std::mutex m_mutex;
         std::condition_variable m_cv;

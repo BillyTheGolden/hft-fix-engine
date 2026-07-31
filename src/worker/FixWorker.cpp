@@ -19,11 +19,10 @@ namespace hft::worker
 {
     using namespace std;
 
-    FixWorker::FixWorker(FixMessagePacktQueue& queue,
-        hft::monitoring::TelemetryCounters& telemetry, string log_filename, size_t expected_messages,
-        int cpu_pin)
+    FixWorker::FixWorker(FixMessagePacktQueue &queue, hft::monitoring::TelemetryCounters &telemetry,
+                         string log_filename, size_t expected_messages, int cpu_pin)
         : m_queue(queue), m_telemetry(telemetry), m_log_filename(std::move(log_filename)),
-        m_expected_messages(expected_messages), m_cpu_pin(cpu_pin), m_logging_running(true)
+          m_expected_messages(expected_messages), m_cpu_pin(cpu_pin), m_logging_running(true)
     {
         m_logging_thread = thread(&FixWorker::run_logging_loop, this);
     }
@@ -68,24 +67,24 @@ namespace hft::worker
             // Map internal category to log4cplus macro level and log asynchronously
             switch (log_msg.category)
             {
-                case hft::common::LogCategory::DEBUG_LEVEL:
-                    LOG4CPLUS_DEBUG_FMT(fix_log, "TS=%lu | %s", log_msg.timestamp_ns, log_msg.message);
-                    break;
-                case hft::common::LogCategory::INFO_LEVEL:
-                    LOG4CPLUS_INFO_FMT(fix_log, "TS=%lu | %s", log_msg.timestamp_ns, log_msg.message);
-                    break;
-                case hft::common::LogCategory::WARNING_LEVEL:
-                    LOG4CPLUS_WARN_FMT(fix_log, "TS=%lu | %s", log_msg.timestamp_ns, log_msg.message);
-                    break;
-                case hft::common::LogCategory::ERROR_LEVEL:
-                    LOG4CPLUS_ERROR_FMT(fix_log, "TS=%lu | %s", log_msg.timestamp_ns, log_msg.message);
-                    break;
-                case hft::common::LogCategory::CRITICAL_LEVEL:
-                    LOG4CPLUS_FATAL_FMT(fix_log, "TS=%lu | %s", log_msg.timestamp_ns, log_msg.message);
-                    break;
-                case hft::common::LogCategory::FATAL_LEVEL:
-                    LOG4CPLUS_FATAL_FMT(fix_log, "TS=%lu | %s", log_msg.timestamp_ns, log_msg.message);
-                    break;
+            case hft::common::LogCategory::DEBUG_LEVEL:
+                LOG4CPLUS_DEBUG_FMT(fix_log, "TS=%lu | %s", log_msg.timestamp_ns, log_msg.message);
+                break;
+            case hft::common::LogCategory::INFO_LEVEL:
+                LOG4CPLUS_INFO_FMT(fix_log, "TS=%lu | %s", log_msg.timestamp_ns, log_msg.message);
+                break;
+            case hft::common::LogCategory::WARNING_LEVEL:
+                LOG4CPLUS_WARN_FMT(fix_log, "TS=%lu | %s", log_msg.timestamp_ns, log_msg.message);
+                break;
+            case hft::common::LogCategory::ERROR_LEVEL:
+                LOG4CPLUS_ERROR_FMT(fix_log, "TS=%lu | %s", log_msg.timestamp_ns, log_msg.message);
+                break;
+            case hft::common::LogCategory::CRITICAL_LEVEL:
+                LOG4CPLUS_FATAL_FMT(fix_log, "TS=%lu | %s", log_msg.timestamp_ns, log_msg.message);
+                break;
+            case hft::common::LogCategory::FATAL_LEVEL:
+                LOG4CPLUS_FATAL_FMT(fix_log, "TS=%lu | %s", log_msg.timestamp_ns, log_msg.message);
+                break;
             }
         }
     }
@@ -99,7 +98,7 @@ namespace hft::worker
         }
 
         hft::common::log_info("[FixWorker] Parser engine initialized and waiting for queue items. Log: " +
-            m_log_filename);
+                              m_log_filename);
 
         std::array<hft::common::FixMessagePacket, 32> pkt_batch;
         auto processed = 0u;
@@ -127,7 +126,7 @@ namespace hft::worker
 
             for (size_t b = 0; b < batch_count; ++b)
             {
-                const auto& pkt = pkt_batch[b];
+                const auto &pkt = pkt_batch[b];
 
                 // OPTIMIZATION: Lookahead L1 CPU Cache Pre-fetching for next packet payload
                 if (b + 1 < batch_count && pkt_batch[b + 1].payload != nullptr)
@@ -141,7 +140,8 @@ namespace hft::worker
                 auto parse_cycles = hft::common::rdtsc();
                 auto elapsed_cycles =
                     (parse_cycles > pkt.rx_timestamp_cycles) ? (parse_cycles - pkt.rx_timestamp_cycles) : 0;
-                auto latency = static_cast<uint64_t>(static_cast<double>(elapsed_cycles) / hft::common::g_cycles_per_ns);
+                auto latency =
+                    static_cast<uint64_t>(static_cast<double>(elapsed_cycles) / hft::common::g_cycles_per_ns);
                 order.latency_ns = latency;
 
                 total_latency_ns += latency;
@@ -160,7 +160,7 @@ namespace hft::worker
                 // Release ring frame memory back to kernel Ring DMA immediately so PACKET_RX_RING never starves
                 if (pkt.ring_hdr != nullptr)
                 {
-                    auto* hdr = static_cast<struct tpacket2_hdr*>(pkt.ring_hdr);
+                    auto *hdr = static_cast<struct tpacket2_hdr *>(pkt.ring_hdr);
                     hdr->tp_status = TP_STATUS_KERNEL;
                 }
 
@@ -171,9 +171,9 @@ namespace hft::worker
                     log_msg.timestamp_ns = hft::common::get_timestamp_ns();
                     log_msg.category = hft::common::LogCategory::INFO_LEVEL;
                     auto res = std::format_to_n(log_msg.message, sizeof(log_msg.message) - 1,
-                        "ClOrdID={} | Sym={} | Side={} | Qty={} | Price={:.4f} | Latency={}ns",
-                        order.cl_ord_id, order.symbol, order.side, order.quantity,
-                        static_cast<double>(order.price) / 1'000'000.0, latency);
+                                                "ClOrdID={} | Sym={} | Side={} | Qty={} | Price={:.4f} | Latency={}ns",
+                                                order.cl_ord_id, order.symbol, order.side, order.quantity,
+                                                static_cast<double>(order.price) / 1'000'000.0, latency);
                     *res.out = '\0';
                     (void)m_log_queue.push(log_msg);
                 }

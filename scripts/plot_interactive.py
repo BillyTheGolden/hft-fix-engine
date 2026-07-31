@@ -240,7 +240,7 @@ def plot_telemetry_interactive(csv_path: str, output_html: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Plot HFT FIX Engine telemetry interactively using Plotly.")
-    parser.add_argument("--csv", default="metrics_time_series.csv", help="Path to input telemetry CSV file.")
+    parser.add_argument("--csv", default="fix_metrics_time_series.csv", help="Path to input telemetry CSV file.")
     parser.add_argument("--out", default="hft_performance_interactive.html", help="Path for output interactive HTML file.")
     args = parser.parse_args()
 

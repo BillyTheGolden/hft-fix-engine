@@ -108,5 +108,5 @@ def plot_order_book_metrics(csv_filepath: str):
     print(f"[Success] Saved Capstone Order Book telemetry plot to: {output_png}")
 
 if __name__ == "__main__":
-    target_csv = sys.argv[1] if len(sys.argv) > 1 else "sbecmeilink3binary_order_book_metrics_time_series.csv"
+    target_csv = sys.argv[1] if len(sys.argv) > 1 else "fix_metrics_time_series.csv"
     plot_order_book_metrics(target_csv)
