@@ -44,10 +44,13 @@ namespace hft::networking
             {
                 hft::common::log_info(
                     "[RxConsumerFactory] Primary Receiver AF_XDP initialized in NATIVE HARDWARE ZERO-COPY MODE.");
-                return af_xdp;
             }
-            hft::common::log_warn("[RxConsumerFactory] AF_XDP running in Generic SKB Mode. Falling back to PACKET_MMAP "
-                                  "Layer-2 socket for multi-queue all-multicast coverage...");
+            else
+            {
+                hft::common::log_info(
+                    "[RxConsumerFactory] Primary Receiver AF_XDP initialized in GENERIC SKB COPY MODE.");
+            }
+            return af_xdp;
         }
         else
         {
