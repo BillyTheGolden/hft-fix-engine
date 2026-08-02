@@ -33,11 +33,12 @@ namespace hft::networking
     inline std::unique_ptr<IRxConsumer> create_rx_consumer(
         const std::string &interface_name, uint16_t filter_port,
         hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192> &queue,
-        hft::monitoring::TelemetryCounters &telemetry, int cpu_pin = -1)
+        hft::monitoring::TelemetryCounters &telemetry, int cpu_pin = -1, uint32_t queue_id = 0)
     {
 #if defined(HFT_ENABLE_AF_XDP)
         hft::common::log_info("[RxConsumerFactory] Attempting Primary Receiver: AF_XDP (XDP Sockets)...");
-        auto af_xdp = std::make_unique<AfXdpRxConsumer>(interface_name, filter_port, queue, telemetry, cpu_pin);
+        auto af_xdp =
+            std::make_unique<AfXdpRxConsumer>(interface_name, filter_port, queue, telemetry, cpu_pin, queue_id);
         if (af_xdp->init())
         {
             if (af_xdp->is_native_zero_copy())

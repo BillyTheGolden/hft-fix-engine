@@ -131,37 +131,30 @@ int main(int argc, char *argv[])
     bool pin_cores = false;
     bool protocol_explicit = false;
     bool direct_queue_mode = false;
+    uint32_t queue_id = 0;
     hft::protocol::ProtocolType protocol_type = hft::protocol::ProtocolType::FIX;
 
     vector<string> positional_args;
     for (int i = 1; i < argc; ++i)
     {
         string arg = argv[i];
-        if (arg == "--pin-cores" || arg == "--pin")
-        {
-            pin_cores = true;
-        }
-        else if (arg == "--direct-queue" || arg == "--in-memory")
-        {
+        if (arg == "--direct-queue" || arg == "--in-memory")
             direct_queue_mode = true;
-        }
+        else if (arg == "--pin-cores" || arg == "--pin")
+            pin_cores = true;
         else if (arg.starts_with("--protocol="))
         {
             protocol_type = hft::protocol::parse_protocol_type(arg.substr(11));
             protocol_explicit = true;
         }
         else if (arg.starts_with("--tx-iface=") || arg.starts_with("--tx-nic=") || arg.starts_with("--producer-iface="))
-        {
             tx_interface = arg.substr(arg.find('=') + 1);
-        }
         else if (arg.starts_with("--rx-iface=") || arg.starts_with("--rx-nic=") || arg.starts_with("--consumer-iface="))
-        {
             rx_interface = arg.substr(arg.find('=') + 1);
-        }
+        else if (arg.starts_with("--queue-id=") || arg.starts_with("--queue="))
+            queue_id = static_cast<uint32_t>(stoul(arg.substr(arg.find('=') + 1)));
         else if (!arg.starts_with("-"))
-        {
             positional_args.push_back(arg);
-        }
     }
 
     if (!rx_interface.empty())
@@ -323,8 +316,8 @@ int main(int argc, char *argv[])
     // Instantiate modular components
     hft::matching::MatchingWorker worker(*shared_queue, *shared_telemetry, log_filename, total_messages, protocol_type,
                                          worker_cpu);
-    auto consumer =
-        hft::networking::create_rx_consumer(rx_interface, target_port, *shared_queue, *shared_telemetry, consumer_cpu);
+    auto consumer = hft::networking::create_rx_consumer(rx_interface, target_port, *shared_queue, *shared_telemetry,
+                                                        consumer_cpu, queue_id);
     hft::networking::UdpFixProducer producer(tx_interface, target_ip, target_port, total_messages, fix_file_path,
                                              producer_cpu, direct_queue_mode ? shared_queue : nullptr);
     hft::monitoring::CsvPerformanceMonitor monitor(*shared_telemetry, *shared_queue, csv_filename, 10, monitor_cpu);

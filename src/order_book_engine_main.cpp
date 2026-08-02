@@ -114,6 +114,7 @@ int main(int argc, char *argv[])
     bool direct_queue_mode = false;
     bool enable_core_pinning = false;
     string explicit_protocol_arg;
+    uint32_t queue_id = 0;
 
     vector<string> positional_args;
     for (int i = 1; i < argc; ++i)
@@ -129,6 +130,8 @@ int main(int argc, char *argv[])
             tx_interface = arg.substr(arg.find('=') + 1);
         else if (arg.starts_with("--rx-iface=") || arg.starts_with("--rx-nic=") || arg.starts_with("--consumer-iface="))
             rx_interface = arg.substr(arg.find('=') + 1);
+        else if (arg.starts_with("--queue-id=") || arg.starts_with("--queue="))
+            queue_id = static_cast<uint32_t>(stoul(arg.substr(arg.find('=') + 1)));
         else if (!arg.starts_with("-"))
             positional_args.push_back(arg);
     }
@@ -280,8 +283,8 @@ int main(int argc, char *argv[])
 
     // Instantiate modular components
     HftOrderBookEngine book_engine(*shared_queue, *shared_telemetry, protocol_type, worker_cpu, log_filename);
-    auto consumer =
-        hft::networking::create_rx_consumer(rx_interface, udp_port, *shared_queue, *shared_telemetry, consumer_cpu);
+    auto consumer = hft::networking::create_rx_consumer(rx_interface, udp_port, *shared_queue, *shared_telemetry,
+                                                        consumer_cpu, queue_id);
     UdpFixProducer producer(tx_interface, target_ip, udp_port, total_messages, fix_file_path, producer_cpu,
                             direct_queue_mode ? shared_queue : nullptr);
     hft::monitoring::CsvPerformanceMonitor monitor(*shared_telemetry, *shared_queue, csv_filename, 10, monitor_cpu);

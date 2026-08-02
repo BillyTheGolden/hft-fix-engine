@@ -16,8 +16,8 @@
 
 #if defined(HFT_ENABLE_AF_XDP)
 
-#include <linux/if_link.h>
 #include <bpf/libbpf.h>
+#include <linux/if_link.h>
 #if defined(HFT_HAS_LIBXDP)
 #include <xdp/xsk.h>
 #else
@@ -52,7 +52,7 @@ namespace hft::networking
          */
         AfXdpRxConsumer(std::string interface_name, uint16_t filter_port,
                         hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192> &queue,
-                        hft::monitoring::TelemetryCounters &telemetry, int cpu_pin = -1);
+                        hft::monitoring::TelemetryCounters &telemetry, int cpu_pin = -1, uint32_t queue_id = 0);
 
         ~AfXdpRxConsumer() override;
 
@@ -71,7 +71,10 @@ namespace hft::networking
          * @brief Returns whether the socket successfully initialized in Native Zero-Copy Mode.
          * @return `true` if Native Zero-Copy is active, `false` if running in SKB Copy Mode.
          */
-        [[nodiscard]] bool is_native_zero_copy() const noexcept { return m_is_native; }
+        [[nodiscard]] bool is_native_zero_copy() const noexcept
+        {
+            return m_is_native;
+        }
 
       private:
         std::string m_interface_name;
@@ -79,6 +82,7 @@ namespace hft::networking
         hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192> &m_queue;
         hft::monitoring::TelemetryCounters &m_telemetry;
         int m_cpu_pin;
+        uint32_t m_queue_id{0};
 
         void *m_umem_buffer{nullptr};
         size_t m_umem_size{0};

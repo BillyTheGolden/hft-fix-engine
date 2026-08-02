@@ -26,9 +26,9 @@ namespace hft::networking
 
     AfXdpRxConsumer::AfXdpRxConsumer(string interface_name, uint16_t filter_port,
                                      hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192> &queue,
-                                     hft::monitoring::TelemetryCounters &telemetry, int cpu_pin)
+                                     hft::monitoring::TelemetryCounters &telemetry, int cpu_pin, uint32_t queue_id)
         : m_interface_name(std::move(interface_name)), m_filter_port(filter_port), m_queue(queue),
-          m_telemetry(telemetry), m_cpu_pin(cpu_pin)
+          m_telemetry(telemetry), m_cpu_pin(cpu_pin), m_queue_id(queue_id)
     {
     }
 
@@ -113,14 +113,15 @@ namespace hft::networking
         xsk_cfg.xdp_flags = XDP_FLAGS_DRV_MODE;
         xsk_cfg.bind_flags = XDP_ZEROCOPY;
 
-        uint32_t queue_id = 0;
+        uint32_t queue_id = m_queue_id;
         ret = xsk_socket__create(&m_xsk, m_interface_name.c_str(), queue_id, m_umem, &m_rx, &m_tx, &xsk_cfg);
 
         if (ret == 0)
         {
             m_is_native = true;
             hft::common::log_info(
-                "[AfXdpRxConsumer] AF_XDP initialized successfully in NATIVE HARDWARE ZERO-COPY MODE!");
+                "[AfXdpRxConsumer] AF_XDP initialized successfully in NATIVE HARDWARE ZERO-COPY MODE on queue_id " +
+                to_string(m_queue_id) + "!");
         }
         else
         {
@@ -133,7 +134,9 @@ namespace hft::networking
             if (ret == 0)
             {
                 m_is_native = false;
-                hft::common::log_info("[AfXdpRxConsumer] AF_XDP initialized successfully in GENERIC SKB COPY MODE!");
+                hft::common::log_info(
+                    "[AfXdpRxConsumer] AF_XDP initialized successfully in GENERIC SKB COPY MODE on queue_id " +
+                    to_string(m_queue_id) + "!");
             }
             else
             {
