@@ -105,19 +105,20 @@ int main(int argc, char *argv[])
     // the engine continues running, just without the page-locking guarantee.
     hft::common::lock_process_memory();
 
-    const string interface_name = argv[1];
-    const uint16_t target_port = static_cast<uint16_t>(stoi(argv[2]));
-    const string source_param = argv[3];
-
+    string rx_interface;
+    string tx_interface;
+    uint16_t target_port = 0;
+    string source_param;
     bool pin_cores = false;
     bool protocol_explicit = false;
     bool direct_queue_mode = false;
     hft::protocol::ProtocolType protocol_type = hft::protocol::ProtocolType::FIX;
 
-    for (int a = 4; a < argc; ++a)
+    vector<string> positional_args;
+    for (int i = 1; i < argc; ++i)
     {
-        string arg = argv[a];
-        if (arg == "--pin-cores")
+        string arg = argv[i];
+        if (arg == "--pin-cores" || arg == "--pin")
         {
             pin_cores = true;
         }
@@ -125,11 +126,63 @@ int main(int argc, char *argv[])
         {
             direct_queue_mode = true;
         }
-        else if (arg.rfind("--protocol=", 0) == 0)
+        else if (arg.starts_with("--protocol="))
         {
             protocol_type = hft::protocol::parse_protocol_type(arg.substr(11));
             protocol_explicit = true;
         }
+        else if (arg.starts_with("--tx-iface=") || arg.starts_with("--tx-nic=") || arg.starts_with("--producer-iface="))
+        {
+            tx_interface = arg.substr(arg.find('=') + 1);
+        }
+        else if (arg.starts_with("--rx-iface=") || arg.starts_with("--rx-nic=") || arg.starts_with("--consumer-iface="))
+        {
+            rx_interface = arg.substr(arg.find('=') + 1);
+        }
+        else if (!arg.starts_with("-"))
+        {
+            positional_args.push_back(arg);
+        }
+    }
+
+    if (positional_args.size() >= 4)
+    {
+        if (rx_interface.empty())
+            rx_interface = positional_args[0];
+        if (tx_interface.empty())
+            tx_interface = positional_args[1];
+        target_port = static_cast<uint16_t>(stoi(positional_args[2]));
+        source_param = positional_args[3];
+    }
+    else if (positional_args.size() == 3)
+    {
+        if (rx_interface.empty())
+            rx_interface = positional_args[0];
+        target_port = static_cast<uint16_t>(stoi(positional_args[1]));
+        source_param = positional_args[2];
+    }
+    else
+    {
+        cerr << "[Error] Missing required command line arguments.\n\n";
+        return EXIT_FAILURE;
+    }
+
+    if (tx_interface.empty())
+    {
+        tx_interface = rx_interface;
+    }
+
+    if (!direct_queue_mode && rx_interface == tx_interface && rx_interface != "lo" && !rx_interface.starts_with("veth"))
+    {
+        cerr << "\n===================================================================================================="
+                "\n"
+             << "[Main] NOTICE: Single physical NIC ('" << rx_interface
+             << "') specified for both RX and TX without '--direct-queue'.\n"
+             << "       Physical NIC drivers do not loop back local egress TX packets to local AF_XDP RX queues.\n"
+             << "       -> SUGGESTION: Pass '--direct-queue' ('--in-memory') for single-machine lock-free testing,\n"
+             << "          or pass 2 distinct NICs: " << argv[0] << " <rx_iface> <tx_iface> <port> <source> [options]\n"
+             << "===================================================================================================="
+                "\n\n";
     }
 
     size_t total_messages = 0;
@@ -189,7 +242,7 @@ int main(int argc, char *argv[])
     else if (protocol_type == hft::protocol::ProtocolType::SBE)
         proto_prefix = "sbe";
 
-    const string target_ip = (interface_name == "lo") ? "127.0.0.1" : "239.255.0.1";
+    const string target_ip = (tx_interface == "lo") ? "127.0.0.1" : "239.255.0.1";
     const string log_filename = proto_prefix + "_hft_matching_engine.log";
     const string csv_filename = proto_prefix + "_metrics_time_series.csv";
 
@@ -218,7 +271,8 @@ int main(int argc, char *argv[])
 
     hft::common::log_info("====================================================");
     hft::common::log_info("  HFT C++20 ORDER MATCHING ENGINE & RESILIENCE GATE ");
-    hft::common::log_info("Interface : " + interface_name + " | Port: " + to_string(target_port));
+    hft::common::log_info("Rx Interface: " + rx_interface + " | Tx Interface: " + tx_interface +
+                          " | Port: " + to_string(target_port));
     hft::common::log_info("Protocol  : " + string(hft::protocol::protocol_type_to_string(protocol_type)));
     hft::common::log_info("Target Msgs: " + to_string(total_messages) +
                           " | Core Pinning: " + (pin_cores ? "ENABLED" : "DISABLED"));
@@ -226,8 +280,9 @@ int main(int argc, char *argv[])
     {
         hft::common::log_info("Source File : " + fix_file_path);
     }
-    hft::common::log_info("Execution Mode: " + string(direct_queue_mode ? "Direct In-Memory Queue (0% Loss Guaranteed)"
-                                                                        : "Network Socket Ring (UDP / PACKET_MMAP)"));
+    hft::common::log_info("Execution Mode: " + string(direct_queue_mode
+                                                          ? "Direct In-Memory Queue (0% Loss Guaranteed)"
+                                                          : "Network Socket Ring (UDP / PACKET_MMAP / AF_XDP)"));
     hft::common::log_info("Telemetry CSV: " + csv_filename + " | Sample Rate: 10 ms");
     hft::common::log_info("Engine Log  : " + log_filename);
     hft::common::log_info("====================================================");
@@ -235,9 +290,9 @@ int main(int argc, char *argv[])
     // Instantiate modular components
     hft::matching::MatchingWorker worker(*shared_queue, *shared_telemetry, log_filename, total_messages, protocol_type,
                                          worker_cpu);
-    auto consumer = hft::networking::create_rx_consumer(interface_name, target_port, *shared_queue, *shared_telemetry,
-                                                        consumer_cpu);
-    hft::networking::UdpFixProducer producer(interface_name, target_ip, target_port, total_messages, fix_file_path,
+    auto consumer =
+        hft::networking::create_rx_consumer(rx_interface, target_port, *shared_queue, *shared_telemetry, consumer_cpu);
+    hft::networking::UdpFixProducer producer(tx_interface, target_ip, target_port, total_messages, fix_file_path,
                                              producer_cpu, direct_queue_mode ? shared_queue : nullptr);
     hft::monitoring::CsvPerformanceMonitor monitor(*shared_telemetry, *shared_queue, csv_filename, 10, monitor_cpu);
 

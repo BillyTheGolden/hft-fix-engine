@@ -41,18 +41,22 @@ static void print_usage(const char *prog_name)
          << "  HFT FIX ENGINE & ZERO-COPY RX RING BYPASS\n"
          << "====================================================\n"
          << "Usage:\n"
-         << "  " << prog_name << " <interface> <port> <source_file_or_count> [options]\n\n"
+         << "  " << prog_name << " <rx_interface> [tx_interface] <port> <source_file_or_count> [options]\n\n"
          << "Positional Arguments:\n"
-         << "  <interface>             Network interface to bind (e.g., 'lo', 'eth0')\n"
+         << "  <rx_interface>          Receiver NIC to bind (e.g., 'veth1', 'lo', 'enp4s0')\n"
+         << "  [tx_interface]          Optional Transmitter NIC for producer (e.g., 'veth0')\n"
          << "  <port>                  UDP port number (e.g., 8888)\n"
          << "  <source_file_or_count>  Input message file path (.data or .txt) or message count\n\n"
          << "Options:\n"
          << "  --help, -h              Display this usage help message and exit\n"
+         << "  --rx-iface=<nic>        Explicit Receiver NIC for AF_XDP / socket consumer\n"
+         << "  --tx-iface=<nic>        Explicit Transmitter NIC for UDP producer\n"
+         << "  --direct-queue          Enable direct in-memory SPSC queue injection (0% loss)\n"
          << "  --pin-cores             Enable real-time thread core pinning and affinity\n\n"
          << "Examples:\n"
+         << "  " << prog_name << " veth1 veth0 8888 ./fix_messages_1m.data --pin-cores\n"
+         << "  " << prog_name << " enp4s0 8888 ./fix_messages_1m.data --pin-cores --direct-queue\n"
          << "  " << prog_name << " lo 8888 50000 --pin-cores\n"
-         << "  " << prog_name << " lo 8888 fix_messages_1m.txt --pin-cores\n"
-         << "  " << prog_name << " --help\n"
          << "====================================================\n";
 }
 
@@ -89,31 +93,18 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // Pin all current and future memory pages of this process into physical RAM.
-    //
-    // Without mlockall(), the kernel may swap out cold pages (e.g. the .text sections of
-    // infrequently-executed code paths, BSS globals, or heap arenas) under memory pressure.
-    // When those pages are subsequently accessed — including on the hot matching path — a
-    // major page fault is triggered: the kernel must perform synchronous disk I/O to reload
-    // the page. This typically takes 1-10 ms, completely obliterating latency targets.
-    //
-    // MCL_FUTURE ensures that every mmap created after this call (huge-page SPSC queue,
-    // PACKET_MMAP ring buffer, UMEM buffer) is also immediately pinned — no separate mlock()
-    // calls are needed per allocation.
-    //
-    // The privilege requirement (CAP_IPC_LOCK) is already satisfied: we confirmed root above.
     hft::common::lock_process_memory();
-
-    // Calibrate RDTSC timing
     hft::common::g_cycles_per_ns = hft::common::calibrate_rdtsc();
 
-    const string interface_name = argv[1];
-    const uint16_t target_port = static_cast<uint16_t>(stoi(argv[2]));
-    const string source_param = argv[3];
-
+    string rx_interface;
+    string tx_interface;
+    uint16_t target_port = 0;
+    string source_param;
     bool pin_cores = false;
     bool direct_queue_mode = false;
-    for (int i = 4; i < argc; ++i)
+
+    vector<string> positional_args;
+    for (int i = 1; i < argc; ++i)
     {
         string arg = argv[i];
         if (arg == "--pin-cores" || arg == "--pin")
@@ -124,6 +115,59 @@ int main(int argc, char *argv[])
         {
             direct_queue_mode = true;
         }
+        else if (arg.starts_with("--tx-iface=") || arg.starts_with("--tx-nic=") || arg.starts_with("--producer-iface="))
+        {
+            tx_interface = arg.substr(arg.find('=') + 1);
+        }
+        else if (arg.starts_with("--rx-iface=") || arg.starts_with("--rx-nic=") || arg.starts_with("--consumer-iface="))
+        {
+            rx_interface = arg.substr(arg.find('=') + 1);
+        }
+        else if (!arg.starts_with("-"))
+        {
+            positional_args.push_back(arg);
+        }
+    }
+
+    if (positional_args.size() >= 4)
+    {
+        if (rx_interface.empty())
+            rx_interface = positional_args[0];
+        if (tx_interface.empty())
+            tx_interface = positional_args[1];
+        target_port = static_cast<uint16_t>(stoi(positional_args[2]));
+        source_param = positional_args[3];
+    }
+    else if (positional_args.size() == 3)
+    {
+        if (rx_interface.empty())
+            rx_interface = positional_args[0];
+        target_port = static_cast<uint16_t>(stoi(positional_args[1]));
+        source_param = positional_args[2];
+    }
+    else
+    {
+        cerr << "[Error] Invalid positional arguments.\n\n";
+        print_usage(argv[0]);
+        return 1;
+    }
+
+    if (tx_interface.empty())
+    {
+        tx_interface = rx_interface;
+    }
+
+    if (!direct_queue_mode && rx_interface == tx_interface && rx_interface != "lo" && !rx_interface.starts_with("veth"))
+    {
+        cerr << "\n===================================================================================================="
+                "\n"
+             << "[Main] NOTICE: Single physical NIC ('" << rx_interface
+             << "') specified for both RX and TX without '--direct-queue'.\n"
+             << "       Physical NIC drivers do not loop back local egress TX packets to local AF_XDP RX queues.\n"
+             << "       -> SUGGESTION: Pass '--direct-queue' ('--in-memory') for single-machine lock-free testing,\n"
+             << "          or pass 2 distinct NICs: " << argv[0] << " <rx_iface> <tx_iface> <port> <source> [options]\n"
+             << "===================================================================================================="
+                "\n\n";
     }
 
     size_t total_messages = 0;
@@ -156,13 +200,12 @@ int main(int argc, char *argv[])
         }
         catch (...)
         {
-            cerr << "[Main] Error: third argument '" << source_param
-                 << "' must be an existing file or integer count.\n";
+            cerr << "[Main] Error: argument '" << source_param << "' must be an existing file or integer count.\n";
             return 1;
         }
     }
 
-    const string target_ip = (interface_name == "lo") ? "127.0.0.1" : "239.255.0.1";
+    const string target_ip = (tx_interface == "lo") ? "127.0.0.1" : "239.255.0.1";
     const string log_filename = "fix_engine.log";
     const string csv_filename = "fix_metrics_time_series.csv";
 
@@ -198,8 +241,9 @@ int main(int argc, char *argv[])
 
     hft::common::log_info("====================================================");
     hft::common::log_info("HFT C++20 FIX ENGINE & ZERO-COPY RX RING BYPASS");
-    hft::common::log_info("Interface : " + interface_name + " | Port: " + to_string(target_port));
-    hft::common::log_info("Target Msgs: " + to_string(total_messages) +
+    hft::common::log_info("Rx Interface: " + rx_interface + " | Tx Interface: " + tx_interface +
+                          " | Port: " + to_string(target_port));
+    hft::common::log_info("Target Msgs : " + to_string(total_messages) +
                           " | Core Pinning: " + (pin_cores ? "ENABLED" : "DISABLED"));
     if (!fix_file_path.empty())
     {
@@ -213,9 +257,9 @@ int main(int argc, char *argv[])
 
     // Instantiate modular components
     hft::worker::FixWorker worker(*shared_queue, *shared_telemetry, log_filename, total_messages, worker_cpu);
-    auto consumer = hft::networking::create_rx_consumer(interface_name, target_port, *shared_queue, *shared_telemetry,
-                                                        consumer_cpu);
-    hft::networking::UdpFixProducer producer(interface_name, target_ip, target_port, total_messages, fix_file_path,
+    auto consumer =
+        hft::networking::create_rx_consumer(rx_interface, target_port, *shared_queue, *shared_telemetry, consumer_cpu);
+    hft::networking::UdpFixProducer producer(tx_interface, target_ip, target_port, total_messages, fix_file_path,
                                              producer_cpu, direct_queue_mode ? shared_queue : nullptr);
     hft::monitoring::CsvPerformanceMonitor monitor(*shared_telemetry, *shared_queue, csv_filename, 10, monitor_cpu);
 

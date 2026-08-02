@@ -88,22 +88,70 @@ int main(int argc, char *argv[])
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
 
-    string interface_name = argv[1];
-    uint16_t udp_port = static_cast<uint16_t>(stoi(argv[2]));
-    string source_param = argv[3];
+    string rx_interface;
+    string tx_interface;
+    uint16_t udp_port = 0;
+    string source_param;
     bool direct_queue_mode = false;
     bool enable_core_pinning = false;
     string explicit_protocol_arg;
 
-    for (int i = 4; i < argc; ++i)
+    vector<string> positional_args;
+    for (int i = 1; i < argc; ++i)
     {
         string arg = argv[i];
         if (arg == "--direct-queue" || arg == "--in-memory")
             direct_queue_mode = true;
-        if (arg == "--pin-cores" || arg == "--pin")
+        else if (arg == "--pin-cores" || arg == "--pin")
             enable_core_pinning = true;
-        if (arg.starts_with("--protocol="))
+        else if (arg.starts_with("--protocol="))
             explicit_protocol_arg = arg.substr(11);
+        else if (arg.starts_with("--tx-iface=") || arg.starts_with("--tx-nic=") || arg.starts_with("--producer-iface="))
+            tx_interface = arg.substr(arg.find('=') + 1);
+        else if (arg.starts_with("--rx-iface=") || arg.starts_with("--rx-nic=") || arg.starts_with("--consumer-iface="))
+            rx_interface = arg.substr(arg.find('=') + 1);
+        else if (!arg.starts_with("-"))
+            positional_args.push_back(arg);
+    }
+
+    if (positional_args.size() >= 4)
+    {
+        if (rx_interface.empty())
+            rx_interface = positional_args[0];
+        if (tx_interface.empty())
+            tx_interface = positional_args[1];
+        udp_port = static_cast<uint16_t>(stoi(positional_args[2]));
+        source_param = positional_args[3];
+    }
+    else if (positional_args.size() == 3)
+    {
+        if (rx_interface.empty())
+            rx_interface = positional_args[0];
+        udp_port = static_cast<uint16_t>(stoi(positional_args[1]));
+        source_param = positional_args[2];
+    }
+    else
+    {
+        cerr << "[Error] Missing required command line arguments.\n\n";
+        return EXIT_FAILURE;
+    }
+
+    if (tx_interface.empty())
+    {
+        tx_interface = rx_interface;
+    }
+
+    if (!direct_queue_mode && rx_interface == tx_interface && rx_interface != "lo" && !rx_interface.starts_with("veth"))
+    {
+        cerr << "\n===================================================================================================="
+                "\n"
+             << "[Main] NOTICE: Single physical NIC ('" << rx_interface
+             << "') specified for both RX and TX without '--direct-queue'.\n"
+             << "       Physical NIC drivers do not loop back local egress TX packets to local AF_XDP RX queues.\n"
+             << "       -> SUGGESTION: Pass '--direct-queue' ('--in-memory') for single-machine lock-free testing,\n"
+             << "          or pass 2 distinct NICs: " << argv[0] << " <rx_iface> <tx_iface> <port> <source> [options]\n"
+             << "===================================================================================================="
+                "\n\n";
     }
 
     size_t total_messages = 0;
@@ -160,26 +208,9 @@ int main(int argc, char *argv[])
 
     string csv_filename = proto_prefix + "_metrics_time_series.csv";
 
-    const string target_ip = (interface_name == "lo") ? "127.0.0.1" : "239.255.0.1";
+    const string target_ip = (tx_interface == "lo") ? "127.0.0.1" : "239.255.0.1";
 
     hft::common::g_cycles_per_ns = hft::common::calibrate_rdtsc();
-
-    // Pin all current and future memory pages of this process into physical RAM.
-    //
-    // Without mlockall(), the OS may swap out cold memory pages (.text, .bss globals,
-    // heap memory) under memory pressure. A subsequent access to a swapped page triggers
-    // a major page fault — a synchronous disk I/O that blocks the accessing thread for
-    // 1–10 ms. For an HFT engine targeting sub-microsecond order processing, a single
-    // major page fault is a > 1000× latency spike.
-    //
-    // MCL_CURRENT: pins all pages already mapped at this call site.
-    // MCL_FUTURE:  automatically locks every new mmap created after this point —
-    //              including the huge-page SPSC queue and telemetry structures below,
-    //              and the AF_XDP UMEM ring buffer opened by AfXdpRxConsumer.
-    //
-    // The privilege requirement (CAP_IPC_LOCK) is satisfied when running as root, which
-    // is required for AF_PACKET and hugectl. On non-root dev builds, the call degrades
-    // gracefully: a warning is printed and the engine continues without page locking.
     hft::common::lock_process_memory();
 
     // Shared Huge Page Queue & Telemetry
@@ -198,7 +229,8 @@ int main(int argc, char *argv[])
 
     hft::common::log_info("====================================================");
     hft::common::log_info("  CAPSTONE C++20 HFT ORDER BOOK & BBO TELEMETRY     ");
-    hft::common::log_info(std::format("Interface : {} | Port: {}", interface_name, udp_port));
+    hft::common::log_info(
+        std::format("Rx Interface: {} | Tx Interface: {} | Port: {}", rx_interface, tx_interface, udp_port));
     hft::common::log_info(std::format("Protocol  : {}", protocol_name));
     hft::common::log_info(std::format("Source    : {} ({} msgs)", source_param, total_messages));
     hft::common::log_info(
@@ -216,8 +248,8 @@ int main(int argc, char *argv[])
     // Instantiate modular components
     HftOrderBookEngine book_engine(*shared_queue, *shared_telemetry, protocol_type, worker_cpu, log_filename);
     auto consumer =
-        hft::networking::create_rx_consumer(interface_name, udp_port, *shared_queue, *shared_telemetry, consumer_cpu);
-    UdpFixProducer producer(interface_name, target_ip, udp_port, total_messages, fix_file_path, producer_cpu,
+        hft::networking::create_rx_consumer(rx_interface, udp_port, *shared_queue, *shared_telemetry, consumer_cpu);
+    UdpFixProducer producer(tx_interface, target_ip, udp_port, total_messages, fix_file_path, producer_cpu,
                             direct_queue_mode ? shared_queue : nullptr);
     hft::monitoring::CsvPerformanceMonitor monitor(*shared_telemetry, *shared_queue, csv_filename, 10, monitor_cpu);
 
