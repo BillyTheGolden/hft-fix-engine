@@ -139,11 +139,20 @@ namespace hft::networking
             hft::common::log_warn("[FixProducer] Warning: Failed to set IP_MULTICAST_TTL option.");
         }
 
-        // 2. Bind socket specifically to the target interface (e.g., enp4s0 or lo)
-        if (!m_interface_name.empty() && setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, m_interface_name.c_str(),
-                                                    static_cast<socklen_t>(m_interface_name.length())) < 0)
+        // 2. Bind socket specifically to target interface (handling veth peer auto-routing for single-instance mode)
+        std::string bind_iface = m_interface_name;
+        if (m_direct_queue == nullptr && bind_iface.rfind("veth", 0) == 0)
         {
-            hft::common::log_warn("[FixProducer] Warning: Failed to bind UDP producer to device '" + m_interface_name +
+            if (bind_iface == "veth1")
+                bind_iface = "veth0";
+            else if (bind_iface == "veth0")
+                bind_iface = "veth1";
+        }
+
+        if (!bind_iface.empty() && setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, bind_iface.c_str(),
+                                              static_cast<socklen_t>(bind_iface.length())) < 0)
+        {
+            hft::common::log_warn("[FixProducer] Warning: Failed to bind UDP producer to device '" + bind_iface +
                                   "'. Ensure root/sudo privileges.");
         }
 
