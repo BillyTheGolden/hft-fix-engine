@@ -21,6 +21,12 @@ namespace hft::protocol
         /** @brief FIX Tag 35 (MsgType, e.g., "D" for New Order Single). */
         std::string_view msg_type;
 
+        /**
+         * @brief Single-character MsgType representation ('D' for New Order Single).
+         * @details OPTIMIZATION (High Finding 2.5): Enables 1-cycle integer comparison on the hot path.
+         */
+        char msg_type_char{'?'};
+
         /** @brief FIX Tag 11 (ClOrdID, unique client identifier). */
         std::string_view cl_ord_id;
 

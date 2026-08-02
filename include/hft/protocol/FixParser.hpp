@@ -113,6 +113,10 @@ namespace hft::protocol
                 {
                 case 35:
                     order.msg_type = std::string_view(val_start, static_cast<size_t>(val_end - val_start));
+                    if (val_start < val_end)
+                    {
+                        order.msg_type_char = *val_start;
+                    }
                     break;
                 case 11:
                     order.cl_ord_id = std::string_view(val_start, static_cast<size_t>(val_end - val_start));

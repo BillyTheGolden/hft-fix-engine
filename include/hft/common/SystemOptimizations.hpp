@@ -42,7 +42,7 @@ namespace hft::common
         if (result != 0)
         {
             std::cerr << "[SystemOptimizations] Warning: Failed to pin thread to CPU " << cpu_id
-                << " (Error: " << result << ")\n";
+                      << " (Error: " << result << ")\n";
         }
 
 #if defined(HFT_ENABLE_NUMA)
@@ -83,7 +83,7 @@ namespace hft::common
      * @param cpu_id Logical core identifier.
      * @return `true` if affinity was set successfully, `false` otherwise.
      */
-    inline bool pin_thread_to_cpu(std::thread& thread, int cpu_id) noexcept
+    inline bool pin_thread_to_cpu(std::thread &thread, int cpu_id) noexcept
     {
         return pin_native_thread_to_cpu(thread.native_handle(), cpu_id);
     }
@@ -97,7 +97,7 @@ namespace hft::common
      */
     inline bool set_realtime_priority(int priority = 50) noexcept
     {
-        struct sched_param param {};
+        struct sched_param param{};
         param.sched_priority = priority;
 
         if (sched_setscheduler(0, SCHED_FIFO, &param) != 0)
@@ -152,7 +152,7 @@ namespace hft::common
      * @param thread_name Name to assign via `pthread_setname_np` (max 15 chars on Linux). Pass nullptr to skip.
      */
     inline void apply_realtime_thread_settings(int cpu_id, int rt_priority = 80,
-        const char* thread_name = nullptr) noexcept
+                                               const char *thread_name = nullptr) noexcept
     {
         // ── Step 1: CPU Core Pinning ─────────────────────────────────────────────────────────────
         // Lock execution to a single physical core. Without this, CFS can migrate this thread to any
@@ -245,8 +245,8 @@ namespace hft::common
         if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0)
         {
             std::cerr << "[SystemOptimizations] Warning: mlockall(MCL_CURRENT|MCL_FUTURE) failed. "
-                << "Memory pages may be paged out under pressure, causing major page-fault "
-                << "latency spikes. Run as root or grant CAP_IPC_LOCK to the binary.\n";
+                      << "Memory pages may be paged out under pressure, causing major page-fault "
+                      << "latency spikes. Run as root or grant CAP_IPC_LOCK to the binary.\n";
             return false;
         }
 
@@ -274,25 +274,31 @@ namespace hft::common
      * @param args Constructor arguments.
      * @return Pointer to the allocated object, or nullptr if allocation fails.
      */
-    template <typename T, typename... Args> [[nodiscard]] inline T* allocate_on_huge_pages(Args &&...args) noexcept
+    template <typename T, typename... Args> [[nodiscard]] inline T *allocate_on_huge_pages(Args &&...args) noexcept
     {
         size_t size = sizeof(T);
         size_t huge_page_size = 2 * 1024 * 1024;
         size_t rounded_size = ((size + huge_page_size - 1) / huge_page_size) * huge_page_size;
 
-        void* ptr =
+        void *ptr =
             mmap(nullptr, rounded_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0);
 
         if (ptr == MAP_FAILED)
         {
-            // Fallback to standard anonymous mmap if huge pages are not configured/available on the system
-            ptr = mmap(nullptr, rounded_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            // Fallback to standard anonymous mmap if huge pages are not configured/available on the system.
+            // MAP_POPULATE pre-faults all pages into physical RAM at creation time rather than taking
+            // page faults on demand during the matching loop.
+            ptr =
+                mmap(nullptr, rounded_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE, -1, 0);
             if (ptr == MAP_FAILED)
             {
                 return nullptr;
             }
             std::cerr << "[SystemOptimizations] Warning: Failed to allocate huge pages. Fell back to standard pages.\n";
         }
+
+        // Lock allocated memory pages into RAM to prevent kernel swapping under memory pressure
+        mlock(ptr, rounded_size);
 
         // Construct object in-place (placement new)
         return ::new (ptr) T(std::forward<Args>(args)...);
@@ -305,7 +311,7 @@ namespace hft::common
      * @tparam T Type of the object.
      * @param ptr Pointer to the object.
      */
-    template <typename T> inline void deallocate_huge_pages(T* ptr) noexcept
+    template <typename T> inline void deallocate_huge_pages(T *ptr) noexcept
     {
         if (ptr == nullptr)
         {

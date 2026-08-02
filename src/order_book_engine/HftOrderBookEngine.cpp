@@ -99,6 +99,7 @@ namespace hft::order_book_engine
 
         int64_t reference_price = 35000000; // $35.00 reference price for risk collars
         uint64_t trade_counter = 0;
+        const double ns_per_cycle = 1.0 / hft::common::g_cycles_per_ns;
 
         auto approved_count = 0ull;
         auto rejected_count = 0ull;
@@ -138,8 +139,9 @@ namespace hft::order_book_engine
                 auto parse_cycles = hft::common::rdtsc();
                 auto elapsed_cycles =
                     (parse_cycles > pkt.rx_timestamp_cycles) ? (parse_cycles - pkt.rx_timestamp_cycles) : 0;
-                auto latency =
-                    static_cast<uint64_t>(static_cast<double>(elapsed_cycles) / hft::common::g_cycles_per_ns);
+                // OPTIMIZATION (High Finding 2.6): Multiply by precomputed reciprocal (vmulsd ~5 cycles vs vdivsd ~25
+                // cycles)
+                auto latency = static_cast<uint64_t>(static_cast<double>(elapsed_cycles) * ns_per_cycle);
                 order.latency_ns = latency;
 
                 uint64_t current_ts = hft::common::get_timestamp_ns();
@@ -204,7 +206,8 @@ namespace hft::order_book_engine
                 }
 
                 // 5. Zero-Allocation Limit Order Book Submission & Price-Time Matching
-                if (risk_approved && order.msg_type == "D")
+                // OPTIMIZATION (High Finding 2.5): 1-cycle integer equality check (order.msg_type_char == 'D')
+                if (risk_approved && order.msg_type_char == 'D')
                 {
                     size_t trades_cnt = m_order_book.submit_order(order, trade_batch.data(), trade_batch.size(),
                                                                   trade_counter, current_ts);

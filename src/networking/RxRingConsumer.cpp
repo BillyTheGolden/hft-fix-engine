@@ -308,7 +308,9 @@ namespace hft::networking
             {
                 hdr->tp_status = TP_STATUS_KERNEL;
             }
-            frame_idx = (frame_idx + 1) % hft::common::FRAME_NR;
+            // OPTIMIZATION (High Finding 8.2): Bitwise AND for power-of-two ring index wrapping (1 cycle vs 20-40
+            // cycles fmod)
+            frame_idx = (frame_idx + 1) & (hft::common::FRAME_NR - 1);
         }
 
         hft::common::log_info("[RxRingConsumer] Loop finished. Total frames captured and queued: " +

@@ -43,19 +43,54 @@ namespace hft::common
     inline constexpr size_t MAX_PAYLOAD_LEN = 512;
 
     /**
-     * @brief Global execution flag to coordinate graceful shutdown across all active threads.
+     * @struct AlignedAtomicFlag
+     * @brief 64-byte cache-line aligned wrapper around std::atomic<bool>.
+     *
+     * @details OPTIMIZATION (High Finding 4.2):
+     *          Prevents false sharing between global execution flags (`g_running`, `g_producer_done`,
+     *          `g_consumer_done`). Previously, declared as adjacent `extern std::atomic<bool>` in BSS,
+     *          they shared a single 64-byte cache line. When the producer or consumer thread wrote to
+     *          its done flag, the L1/L2 cache line was invalidated across all reader CPU cores.
+     *          `alignas(64)` guarantees each flag occupies its own dedicated cache line.
      */
-    extern std::atomic<bool> g_running;
+    struct alignas(64) AlignedAtomicFlag
+    {
+        std::atomic<bool> flag{false};
+
+        constexpr AlignedAtomicFlag() noexcept = default;
+
+        explicit AlignedAtomicFlag(bool initial) noexcept : flag(initial)
+        {
+        }
+
+        [[nodiscard]] bool load(std::memory_order order = std::memory_order_seq_cst) const noexcept
+        {
+            return flag.load(order);
+        }
+
+        void store(bool desired, std::memory_order order = std::memory_order_seq_cst) noexcept
+        {
+            flag.store(desired, order);
+        }
+    };
+
+    /**
+     * @brief Global execution flag to coordinate graceful shutdown across all active threads.
+     * @details Aligned to 64-byte boundary to prevent false sharing invalidations on the hot path.
+     */
+    extern AlignedAtomicFlag g_running;
 
     /**
      * @brief Global flag to signal that the producer thread has completed injecting all packets.
+     * @details Aligned to 64-byte boundary to prevent false sharing invalidations on the hot path.
      */
-    extern std::atomic<bool> g_producer_done;
+    extern AlignedAtomicFlag g_producer_done;
 
     /**
      * @brief Global flag to signal that the consumer thread has completed reading all packets and exited.
+     * @details Aligned to 64-byte boundary to prevent false sharing invalidations on the hot path.
      */
-    extern std::atomic<bool> g_consumer_done;
+    extern AlignedAtomicFlag g_consumer_done;
 
     /**
      * @struct FixMessagePacket
@@ -65,21 +100,16 @@ namespace hft::common
     struct alignas(64) FixMessagePacket
     {
         /** @brief CPU cycle count recorded exactly when the frame was read from the kernel ring. */
-        uint64_t rx_timestamp_cycles{ 0 };
+        uint64_t rx_timestamp_cycles{0};
 
         /** @brief Number of valid bytes in the payload. */
-        uint32_t payload_len{ 0 };
+        uint16_t payload_len{0};
 
-        /** @brief Pointer to the raw payload inside the memory-mapped ring buffer. */
-        char* payload{ nullptr };
+        /** @brief Pointer to the raw payload buffer. */
+        char *payload{nullptr};
 
-        /** @brief Opaque pointer to the ring frame header (tpacket2_hdr) to allow deferred release. */
-        void* ring_hdr{ nullptr };
-
-        /**
-         * @brief Default constructor zero-initializing all packet fields.
-         */
-        constexpr FixMessagePacket() noexcept = default;
+        /** @brief Pointer to kernel packet ring header for ring buffer release. */
+        void *ring_hdr{nullptr};
     };
 
     /**
@@ -89,7 +119,7 @@ namespace hft::common
      */
     [[nodiscard]] inline uint64_t get_timestamp_ns() noexcept
     {
-        struct timespec ts {};
+        struct timespec ts{};
         clock_gettime(CLOCK_MONOTONIC, &ts);
         return static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL + static_cast<uint64_t>(ts.tv_nsec);
     }
@@ -170,8 +200,8 @@ namespace hft::common
      */
     struct alignas(64) LogMessage
     {
-        uint64_t timestamp_ns{ 0 };
-        LogCategory category{ LogCategory::INFO_LEVEL };
+        uint64_t timestamp_ns{0};
+        LogCategory category{LogCategory::INFO_LEVEL};
         char message[256]{};
 
         constexpr LogMessage() noexcept = default;
@@ -193,7 +223,7 @@ namespace hft::common
      */
     struct alignas(64) ConsoleMessage
     {
-        ConsoleCategory category{ ConsoleCategory::INFO_MSG };
+        ConsoleCategory category{ConsoleCategory::INFO_MSG};
         char message[256]{};
 
         constexpr ConsoleMessage() noexcept = default;

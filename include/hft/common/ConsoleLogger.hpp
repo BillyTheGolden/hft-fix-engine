@@ -42,17 +42,21 @@ namespace hft::common
         /**
          * @brief Queues a message for printing (blocking).
          * @param category The severity category (INFO_MSG, WARN_MSG, ERROR_MSG).
-         * @param msg The message string to log.
+         * @param msg The message string view to log.
+         *
+         * @details OPTIMIZATION (High Finding 6.1):
+         *          Accepts `std::string_view` instead of `const std::string&` to eliminate transient
+         *          heap allocations (`malloc`) at call sites passing string literals or formatted views.
          */
-        void log(ConsoleCategory category, const std::string &msg) noexcept;
+        void log(ConsoleCategory category, std::string_view msg) noexcept;
 
         /**
          * @brief Queues a message for printing (non-blocking).
          * @param category The severity category.
-         * @param msg The message string to log.
+         * @param msg The message string view to log.
          * @return `true` if queued successfully; `false` if queue was busy.
          */
-        bool try_log(ConsoleCategory category, const std::string &msg) noexcept;
+        bool try_log(ConsoleCategory category, std::string_view msg) noexcept;
 
         /**
          * @brief Shuts down the console logging thread and restores terminal settings.
@@ -80,14 +84,14 @@ namespace hft::common
         bool m_terminal_configured{false};
     };
 
-    // Global logging helpers
-    void log_info(const std::string &msg) noexcept;
-    void log_warn(const std::string &msg) noexcept;
-    void log_error(const std::string &msg) noexcept;
+    // Global logging helpers (accepting string_view to avoid allocation)
+    void log_info(std::string_view msg) noexcept;
+    void log_warn(std::string_view msg) noexcept;
+    void log_error(std::string_view msg) noexcept;
 
-    // Hot-path non-blocking helpers
-    bool try_log_info(const std::string &msg) noexcept;
-    bool try_log_warn(const std::string &msg) noexcept;
-    bool try_log_error(const std::string &msg) noexcept;
+    // Hot-path non-blocking helpers (accepting string_view to avoid allocation)
+    bool try_log_info(std::string_view msg) noexcept;
+    bool try_log_warn(std::string_view msg) noexcept;
+    bool try_log_error(std::string_view msg) noexcept;
 
 } // namespace hft::common

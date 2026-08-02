@@ -141,6 +141,7 @@ namespace hft::matching
 
         int64_t reference_price = 35000000; // $35.00 reference price for risk collars
         auto start_time = chrono::steady_clock::now();
+        const double ns_per_cycle = 1.0 / hft::common::g_cycles_per_ns;
 
         auto approved_count = 0ull;
         auto rejected_count = 0ull;
@@ -180,15 +181,16 @@ namespace hft::matching
                 auto parse_cycles = hft::common::rdtsc();
                 auto elapsed_cycles =
                     (parse_cycles > pkt.rx_timestamp_cycles) ? (parse_cycles - pkt.rx_timestamp_cycles) : 0;
-                auto latency =
-                    static_cast<uint64_t>(static_cast<double>(elapsed_cycles) / hft::common::g_cycles_per_ns);
+                // OPTIMIZATION (High Finding 2.6): Multiply by precomputed reciprocal (vmulsd ~5 cycles vs vdivsd ~25
+                // cycles)
+                auto latency = static_cast<uint64_t>(static_cast<double>(elapsed_cycles) * ns_per_cycle);
                 order.latency_ns = latency;
 
                 uint64_t current_ts = hft::common::get_timestamp_ns();
 
                 // 2. Scenario #3: Clock Synchronization & Anomaly Detection
                 uint64_t proc_ts = current_ts;
-                uint64_t rx_ts = pkt.rx_timestamp_cycles / static_cast<uint64_t>(hft::common::g_cycles_per_ns);
+                uint64_t rx_ts = static_cast<uint64_t>(static_cast<double>(pkt.rx_timestamp_cycles) * ns_per_cycle);
                 (void)m_clock_sync.evaluate_latency(rx_ts, proc_ts);
 
                 // 3. Scenario #4: Active-Active Feed Arbitration & Duplicate Suppression
@@ -252,7 +254,8 @@ namespace hft::matching
                 }
 
                 // 6. Order Matching Engine Execution (Only for approved orders)
-                if (risk_approved && order.msg_type == "D") // New Order Single
+                // OPTIMIZATION (High Finding 2.5): 1-cycle integer equality check (order.msg_type_char == 'D')
+                if (risk_approved && order.msg_type_char == 'D') // New Order Single
                 {
                     trades.clear();
                     bool matched = m_matching_engine.process_order(order, trades, current_ts);

@@ -43,9 +43,14 @@ namespace hft::networking
     {
       public:
         UdpFixProducer(std::string interface_name, std::string target_ip, uint16_t target_port, size_t total_messages,
-                       std::string fix_file_path = "", int cpu_pin = -1, FixMessagePacktQueue* direct_queue = nullptr);
+                       std::string fix_file_path = "", int cpu_pin = -1, FixMessagePacktQueue *direct_queue = nullptr);
 
         ~UdpFixProducer() override = default;
+
+        /**
+         * @brief Executes the generation/loading and UDP `sendto` loop until queue is empty.
+         */
+        void run() override;
 
         /**
          * @brief Executes the generation/loading and UDP `sendto` loop until queue is empty.
@@ -58,8 +63,18 @@ namespace hft::networking
         uint16_t m_target_port;
         size_t m_total_messages;
         std::string m_fix_file_path;
-        FixMessagePacktQueue* m_direct_queue;
+        FixMessagePacktQueue *m_direct_queue;
         int m_cpu_pin;
-        std::vector<std::string> m_loaded_messages;
+
+        /**
+         * @brief Contiguous file buffer storing loaded raw dataset bytes.
+         * @details OPTIMIZATION (High Finding 9.1): Eliminates 1M per-message `std::string` allocations.
+         */
+        std::string m_raw_file_data;
+
+        /**
+         * @brief Non-owning views pointing into contiguous `m_raw_file_data`.
+         */
+        std::vector<std::string_view> m_loaded_messages;
     };
 } // namespace hft::networking

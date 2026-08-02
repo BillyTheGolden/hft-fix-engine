@@ -9,9 +9,9 @@ namespace hft::common
 {
     using namespace std;
 
-    atomic<bool> g_running{true};
-    atomic<bool> g_producer_done{false};
-    atomic<bool> g_consumer_done{false};
+    AlignedAtomicFlag g_running{true};
+    AlignedAtomicFlag g_producer_done{false};
+    AlignedAtomicFlag g_consumer_done{false};
 
     double g_cycles_per_ns = 1.0;
 

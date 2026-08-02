@@ -35,7 +35,7 @@ namespace hft::common
         m_initialized = true;
     }
 
-    void ConsoleLogger::log(ConsoleCategory category, const string &msg) noexcept
+    void ConsoleLogger::log(ConsoleCategory category, string_view msg) noexcept
     {
         if (!m_running.load(memory_order_relaxed))
         {
@@ -53,12 +53,14 @@ namespace hft::common
 
         ConsoleMessage m;
         m.category = category;
-        auto res = format_to_n(m.message, sizeof(m.message) - 1, "{}", msg);
-        *res.out = '\0';
+        // OPTIMIZATION (High Finding 6.2): Direct memcpy instead of format_to_n (10x faster)
+        size_t copy_len = min(msg.length(), sizeof(m.message) - 1);
+        memcpy(m.message, msg.data(), copy_len);
+        m.message[copy_len] = '\0';
         m_queue.push(m);
     }
 
-    bool ConsoleLogger::try_log(ConsoleCategory category, const string &msg) noexcept
+    bool ConsoleLogger::try_log(ConsoleCategory category, string_view msg) noexcept
     {
         if (!m_running.load(memory_order_relaxed))
         {
@@ -67,8 +69,10 @@ namespace hft::common
 
         ConsoleMessage m;
         m.category = category;
-        auto res = format_to_n(m.message, sizeof(m.message) - 1, "{}", msg);
-        *res.out = '\0';
+        // OPTIMIZATION (High Finding 6.2): Direct memcpy instead of format_to_n (10x faster)
+        size_t copy_len = min(msg.length(), sizeof(m.message) - 1);
+        memcpy(m.message, msg.data(), copy_len);
+        m.message[copy_len] = '\0';
         return m_queue.try_push(m);
     }
 
@@ -271,32 +275,32 @@ namespace hft::common
     }
 
     // Helper implementations
-    void log_info(const string &msg) noexcept
+    void log_info(string_view msg) noexcept
     {
         ConsoleLogger::getInstance().log(ConsoleCategory::INFO_MSG, msg);
     }
 
-    void log_warn(const string &msg) noexcept
+    void log_warn(string_view msg) noexcept
     {
         ConsoleLogger::getInstance().log(ConsoleCategory::WARN_MSG, msg);
     }
 
-    void log_error(const string &msg) noexcept
+    void log_error(string_view msg) noexcept
     {
         ConsoleLogger::getInstance().log(ConsoleCategory::ERROR_MSG, msg);
     }
 
-    bool try_log_info(const string &msg) noexcept
+    bool try_log_info(string_view msg) noexcept
     {
         return ConsoleLogger::getInstance().try_log(ConsoleCategory::INFO_MSG, msg);
     }
 
-    bool try_log_warn(const string &msg) noexcept
+    bool try_log_warn(string_view msg) noexcept
     {
         return ConsoleLogger::getInstance().try_log(ConsoleCategory::WARN_MSG, msg);
     }
 
-    bool try_log_error(const string &msg) noexcept
+    bool try_log_error(string_view msg) noexcept
     {
         return ConsoleLogger::getInstance().try_log(ConsoleCategory::ERROR_MSG, msg);
     }
