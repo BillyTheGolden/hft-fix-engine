@@ -164,26 +164,40 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (positional_args.size() >= 4)
+    if (!rx_interface.empty())
     {
-        if (rx_interface.empty())
-            rx_interface = positional_args[0];
-        if (tx_interface.empty())
-            tx_interface = positional_args[1];
-        target_port = static_cast<uint16_t>(stoi(positional_args[2]));
-        source_param = positional_args[3];
-    }
-    else if (positional_args.size() == 3)
-    {
-        if (rx_interface.empty())
-            rx_interface = positional_args[0];
-        target_port = static_cast<uint16_t>(stoi(positional_args[1]));
-        source_param = positional_args[2];
+        if (positional_args.size() >= 2)
+        {
+            target_port = static_cast<uint16_t>(stoi(positional_args[0]));
+            source_param = positional_args[1];
+        }
+        else
+        {
+            cerr << "[Error] Missing port or source_param argument.\n\n";
+            return EXIT_FAILURE;
+        }
     }
     else
     {
-        cerr << "[Error] Missing required command line arguments.\n\n";
-        return EXIT_FAILURE;
+        if (positional_args.size() >= 4)
+        {
+            rx_interface = positional_args[0];
+            if (tx_interface.empty())
+                tx_interface = positional_args[1];
+            target_port = static_cast<uint16_t>(stoi(positional_args[2]));
+            source_param = positional_args[3];
+        }
+        else if (positional_args.size() == 3)
+        {
+            rx_interface = positional_args[0];
+            target_port = static_cast<uint16_t>(stoi(positional_args[1]));
+            source_param = positional_args[2];
+        }
+        else
+        {
+            cerr << "[Error] Missing required command line arguments.\n\n";
+            return EXIT_FAILURE;
+        }
     }
 
     if (tx_interface.empty())
