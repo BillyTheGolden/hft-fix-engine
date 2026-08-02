@@ -30,9 +30,15 @@ namespace hft::protocol
 
     inline ProtocolType parse_protocol_type(std::string_view name) noexcept
     {
-        if (name == "OUCH" || name == "ouch")
+        std::string s(name);
+        for (char &c : s)
+        {
+            c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+        }
+
+        if (s.find("ouch") != std::string::npos)
             return ProtocolType::OUCH;
-        if (name == "SBE" || name == "sbe")
+        if (s.find("sbe") != std::string::npos)
             return ProtocolType::SBE;
         return ProtocolType::FIX;
     }

@@ -9,6 +9,7 @@
 #include "hft/networking/FixProducer.hpp"
 #include "hft/networking/RxConsumerFactory.hpp"
 #include "hft/networking/RxRingConsumer.hpp"
+#include "hft/protocol/ProtocolParser.hpp"
 #include "hft/worker/FixWorker.hpp"
 
 #include <csignal>
@@ -254,9 +255,16 @@ int main(int argc, char *argv[])
         }
     }
 
+    hft::protocol::ProtocolType protocol_type = hft::protocol::parse_protocol_type(source_param);
+    string proto_prefix = "fix";
+    if (protocol_type == hft::protocol::ProtocolType::OUCH)
+        proto_prefix = "ouch";
+    else if (protocol_type == hft::protocol::ProtocolType::SBE)
+        proto_prefix = "sbe";
+
     const string target_ip = (tx_interface == "lo") ? "127.0.0.1" : "239.255.0.1";
-    const string log_filename = "fix_engine.log";
-    const string csv_filename = "fix_metrics_time_series.csv";
+    const string log_filename = proto_prefix + "_engine.log";
+    const string csv_filename = proto_prefix + "_metrics_time_series.csv";
 
     // Optional CPU core pinning assignments
     int cpu_count = hft::common::get_cpu_count();
