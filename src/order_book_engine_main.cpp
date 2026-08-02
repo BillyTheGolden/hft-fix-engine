@@ -62,6 +62,25 @@ static void print_usage(const char *prog_name)
          << "====================================================\n";
 }
 
+static bool is_binary_dataset_file(const string &file_path)
+{
+    if (file_path.empty())
+        return false;
+    ifstream file(file_path, ios::binary);
+    if (!file.is_open())
+        return false;
+
+    char header[8] = {0};
+    file.read(header, sizeof(header));
+    string_view head_view(header, static_cast<size_t>(file.gcount()));
+
+    if (head_view.starts_with("8=FIX") || head_view.starts_with("8="))
+    {
+        return false; // ASCII FIX Protocol message file
+    }
+    return file_path.ends_with(".data") || (head_view.length() > 0 && head_view[0] == 'O');
+}
+
 int main(int argc, char *argv[])
 {
     for (int i = 1; i < argc; ++i)
@@ -159,7 +178,7 @@ int main(int argc, char *argv[])
     if (filesystem::exists(source_param))
     {
         fix_file_path = source_param;
-        bool is_binary = (fix_file_path.size() >= 5 && fix_file_path.substr(fix_file_path.size() - 5) == ".data");
+        bool is_binary = is_binary_dataset_file(fix_file_path);
         if (is_binary)
         {
             size_t file_size = filesystem::file_size(fix_file_path);

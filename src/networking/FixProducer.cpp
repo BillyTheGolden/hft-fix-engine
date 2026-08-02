@@ -23,11 +23,18 @@ namespace hft::networking
     {
         if (!m_fix_file_path.empty())
         {
-            // OPTIMIZATION (Low Finding 9.2): Use string_view::ends_with instead of substr allocation
-            bool is_binary = string_view(m_fix_file_path).ends_with(".data");
-            ifstream file(m_fix_file_path, is_binary ? ios::binary : ios::in);
+            ifstream file(m_fix_file_path, ios::binary);
             if (file.is_open())
             {
+                char header[8] = {0};
+                file.read(header, sizeof(header));
+                string_view head_view(header, static_cast<size_t>(file.gcount()));
+
+                bool is_fix_ascii = head_view.starts_with("8=FIX") || head_view.starts_with("8=");
+                bool is_binary = !is_fix_ascii && (string_view(m_fix_file_path).ends_with(".data") ||
+                                                   (head_view.length() > 0 && head_view[0] == 'O'));
+
+                file.seekg(0, ios::beg);
                 if (is_binary)
                 {
                     file.seekg(0, ios::end);
