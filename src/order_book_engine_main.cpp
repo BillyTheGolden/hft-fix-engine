@@ -164,6 +164,24 @@ int main(int argc, char *argv[])
 
     hft::common::g_cycles_per_ns = hft::common::calibrate_rdtsc();
 
+    // Pin all current and future memory pages of this process into physical RAM.
+    //
+    // Without mlockall(), the OS may swap out cold memory pages (.text, .bss globals,
+    // heap memory) under memory pressure. A subsequent access to a swapped page triggers
+    // a major page fault — a synchronous disk I/O that blocks the accessing thread for
+    // 1–10 ms. For an HFT engine targeting sub-microsecond order processing, a single
+    // major page fault is a > 1000× latency spike.
+    //
+    // MCL_CURRENT: pins all pages already mapped at this call site.
+    // MCL_FUTURE:  automatically locks every new mmap created after this point —
+    //              including the huge-page SPSC queue and telemetry structures below,
+    //              and the AF_XDP UMEM ring buffer opened by AfXdpRxConsumer.
+    //
+    // The privilege requirement (CAP_IPC_LOCK) is satisfied when running as root, which
+    // is required for AF_PACKET and hugectl. On non-root dev builds, the call degrades
+    // gracefully: a warning is printed and the engine continues without page locking.
+    hft::common::lock_process_memory();
+
     // Shared Huge Page Queue & Telemetry
     auto *shared_queue =
         hft::common::allocate_on_huge_pages<hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192>>();

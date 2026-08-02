@@ -89,6 +89,21 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    // Pin all current and future memory pages of this process into physical RAM.
+    //
+    // Without mlockall(), the kernel may swap out cold pages (e.g. the .text sections of
+    // infrequently-executed code paths, BSS globals, or heap arenas) under memory pressure.
+    // When those pages are subsequently accessed — including on the hot matching path — a
+    // major page fault is triggered: the kernel must perform synchronous disk I/O to reload
+    // the page. This typically takes 1–10 ms, completely obliterating latency targets.
+    //
+    // MCL_FUTURE ensures that every mmap created after this call (huge-page SPSC queue,
+    // PACKET_MMAP ring buffer, UMEM buffer) is also immediately pinned — no separate mlock()
+    // calls are needed per allocation.
+    //
+    // The privilege requirement (CAP_IPC_LOCK) is already satisfied: we confirmed root above.
+    hft::common::lock_process_memory();
+
     // Calibrate RDTSC timing
     hft::common::g_cycles_per_ns = hft::common::calibrate_rdtsc();
 

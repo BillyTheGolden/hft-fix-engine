@@ -91,11 +91,21 @@ namespace hft::worker
 
     void FixWorker::run()
     {
-        if (m_cpu_pin >= 0)
-        {
-            hft::common::pin_thread_to_cpu(m_cpu_pin);
-            hft::common::log_info("[FixWorker] Thread pinned to CPU core " + std::to_string(m_cpu_pin));
-        }
+        // Apply the full real-time thread configuration as the very first action of this thread.
+        //
+        // Before this fix, only pin_thread_to_cpu() was called, which bound the thread to a
+        // single CPU core. However, the thread remained in the CFS (Completely Fair Scheduler)
+        // time-sharing class — meaning the kernel could preempt it at any moment to schedule
+        // other tasks, introducing up to ~4 ms of worst-case latency on the FIX parsing path.
+        //
+        // apply_realtime_thread_settings() applies three ordered steps:
+        //   1. pin_thread_to_cpu(m_cpu_pin)     — dedicated core: prevents cache/BTB invalidation
+        //   2. set_realtime_priority(80)         — SCHED_FIFO: the kernel will not preempt this thread
+        //   3. pthread_setname_np("hft_fix_wkr") — visible in perf, htop, /proc/<pid>/task/*/comm
+        //
+        // Root / CAP_SYS_NICE is already required by this process for AF_PACKET sockets.
+        // Without those privileges the call degrades gracefully to CFS-only (warning logged).
+        hft::common::apply_realtime_thread_settings(m_cpu_pin, 80, "hft_fix_wkr");
 
         hft::common::log_info("[FixWorker] Parser engine initialized and waiting for queue items. Log: " +
                               m_log_filename);

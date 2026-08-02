@@ -99,15 +99,41 @@ namespace hft::matching
 
     void MatchingWorker::run()
     {
-        if (m_cpu_pin >= 0)
-        {
-            hft::common::pin_thread_to_cpu(m_cpu_pin);
-            hft::common::log_info("[MatchingWorker] Thread pinned to CPU core " + std::to_string(m_cpu_pin));
-        }
+        // Apply the full real-time thread configuration as the very first action of this thread.
+        //
+        // The previous code only called pin_thread_to_cpu(), which locked the thread to a single
+        // CPU core but left it under the CFS (Completely Fair Scheduler) time-sharing class.
+        // CFS assigns each thread a time quantum (~1–4 ms on a typical 250 Hz kernel). When the
+        // quantum expires the kernel PREEMPTS the thread — even mid-loop — adding up to 4 ms of
+        // scheduler-induced latency jitter to every order processed after a preemption event.
+        //
+        // apply_realtime_thread_settings() activates all three layers of protection:
+        //   1. pin_thread_to_cpu(m_cpu_pin)         — lock to dedicated core, preserve L1/L2 cache
+        //   2. set_realtime_priority(80)             — SCHED_FIFO: no CFS preemption on the hot path
+        //   3. pthread_setname_np("hft_matcher")     — visible in perf, htop, /proc/<pid>/task/*/comm
+        //
+        // SCHED_FIFO requires root/CAP_SYS_NICE; this engine already runs as root for AF_PACKET.
+        // On non-root dev builds the call degrades gracefully (warning printed, CFS retained).
+        hft::common::apply_realtime_thread_settings(m_cpu_pin, 80, "hft_matcher");
 
         hft::common::log_info("[MatchingWorker] Order Matching Engine initialized. Logging to: " + m_log_filename);
 
         std::array<hft::common::FixMessagePacket, 32> pkt_batch;
+        // Pre-allocated trade execution vector (reused across all packet iterations).
+        //
+        // OPTIMIZATION (Critical Finding 2.1):
+        // Previously, `std::vector<TradeExecution> trades` was constructed on the stack inside
+        // the per-packet `for (size_t b = 0; b < batch_count; ++b)` loop. Constructing a vector
+        // inside the hot path causes a dynamic heap allocation (`malloc`) on every packet, even
+        // if no trades are matched. For 1M messages, this resulted in 1M heap allocations.
+        //
+        // Pre-allocating `trades` outside the loop with `reserve(16)` and invoking `trades.clear()`
+        // inside the loop reuses the existing heap capacity without deallocating memory. `clear()`
+        // simply resets the vector size counter to 0 in a single CPU cycle, achieving 0-allocation
+        // matching execution on the hot path.
+        std::vector<TradeExecution> trades;
+        trades.reserve(16);
+
         auto processed = 0u;
         auto total_latency_ns = 0ull;
         auto min_latency_ns = UINT64_MAX;
@@ -228,7 +254,7 @@ namespace hft::matching
                 // 6. Order Matching Engine Execution (Only for approved orders)
                 if (risk_approved && order.msg_type == "D") // New Order Single
                 {
-                    std::vector<TradeExecution> trades;
+                    trades.clear();
                     bool matched = m_matching_engine.process_order(order, trades, current_ts);
 
                     if (matched && !trades.empty())

@@ -89,6 +89,22 @@ int main(int argc, char *argv[])
                               "AF_INET UDP socket.");
     }
 
+    // Pin all current and future memory pages of this process into physical RAM.
+    //
+    // Without mlockall(), the kernel may swap out any page (hot-path .text, SPSC queue
+    // pages, UMEM ring buffer) under memory pressure. Accessing a swapped page causes a
+    // major page fault — a synchronous disk I/O that blocks the thread for 1–10 ms, which
+    // is a catastrophic latency spike for an engine targeting sub-microsecond processing.
+    //
+    // MCL_CURRENT: pins all pages that already exist at this call site.
+    // MCL_FUTURE:  automatically pins every new mmap region created after this call,
+    //              including the huge-page SPSC queue and AF_XDP UMEM buffer below.
+    //
+    // Requires CAP_IPC_LOCK. When running as root (needed for AF_PACKET), this is granted.
+    // On non-root dev builds, lock_process_memory() prints a warning and returns false —
+    // the engine continues running, just without the page-locking guarantee.
+    hft::common::lock_process_memory();
+
     const string interface_name = argv[1];
     const uint16_t target_port = static_cast<uint16_t>(stoi(argv[2]));
     const string source_param = argv[3];

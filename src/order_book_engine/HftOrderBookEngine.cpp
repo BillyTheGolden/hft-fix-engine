@@ -70,11 +70,21 @@ namespace hft::order_book_engine
 
     void HftOrderBookEngine::run()
     {
-        if (m_cpu_pin >= 0)
-        {
-            hft::common::pin_thread_to_cpu(m_cpu_pin);
-            hft::common::log_info("[HftOrderBookEngine] Thread pinned to CPU core " + to_string(m_cpu_pin));
-        }
+        // Apply the full real-time thread configuration as the very first action of this thread.
+        //
+        // This replaces the previous standalone pin_thread_to_cpu() call, which only set CPU
+        // affinity but left the thread running under the default CFS time-sharing scheduler.
+        // Under CFS the kernel can preempt this thread for up to ~4 ms every scheduler quantum
+        // — directly adding multi-millisecond latency spikes to the order matching hot path.
+        //
+        // apply_realtime_thread_settings() performs three atomic steps (in order):
+        //   1. pin_thread_to_cpu(m_cpu_pin)       — lock to a dedicated core, prevent cache migration
+        //   2. set_realtime_priority(80)           — elevate to SCHED_FIFO, eliminating CFS preemption
+        //   3. pthread_setname_np("hft_ob_engine") — name the thread for perf/htop/strace visibility
+        //
+        // The engine already requires root (for AF_PACKET), so SCHED_FIFO privilege is pre-satisfied.
+        // If SCHED_FIFO fails (e.g. non-root dev run), it degrades gracefully with a warning.
+        hft::common::apply_realtime_thread_settings(m_cpu_pin, 80, "hft_ob_engine");
 
         hft::common::log_info("[HftOrderBookEngine] Modern C++20 Order Book Engine initialized. Logging to: " +
                               m_log_filename);
