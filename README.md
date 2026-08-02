@@ -159,7 +159,15 @@ A comparative evaluation analyzing kernel **2MB HugePages** memory allocation vs
    Pre-allocating contiguous 2MB HugePages pins physical RAM pages at startup, preventing OS page swapping and minor page faults under heavy trading loads.
 
 ### Visual Dashboard Output:
-<img src="order_book_dashboard.png" alt="HugePages Order Book Telemetry Dashboard" style="max-width: 100%; height: auto; display: block; margin: 12px auto; border: 1px solid #00FFCC; border-radius: 4px;" width="850"/>
+
+#### 1. FIX 4.2 (ASCII Tag=Value) Telemetry Dashboard
+<img src="docs/images/fix_telemetry_dashboard.png" alt="FIX 4.2 Telemetry Dashboard" style="max-width: 100%; height: auto; display: block; margin: 12px auto; border: 1px solid #00FFCC; border-radius: 4px;" width="850"/>
+
+#### 2. Nasdaq OUCH 5.0 (Fixed Binary C-Struct) Telemetry Dashboard
+<img src="docs/images/ouch_telemetry_dashboard.png" alt="Nasdaq OUCH 5.0 Telemetry Dashboard" style="max-width: 100%; height: auto; display: block; margin: 12px auto; border: 1px solid #00FFCC; border-radius: 4px;" width="850"/>
+
+#### 3. CME SBE iLink 3 (Simple Binary Encoding) Telemetry Dashboard
+<img src="docs/images/sbe_telemetry_dashboard.png" alt="CME SBE iLink 3 Telemetry Dashboard" style="max-width: 100%; height: auto; display: block; margin: 12px auto; border: 1px solid #00FFCC; border-radius: 4px;" width="850"/>
 
 ---
 
@@ -197,6 +205,11 @@ python3 scripts/plot_performance.py --csv sbe_metrics_time_series.csv --out sbe_
 # Generate interactive Plotly HTML dashboard opening in browser
 python3 scripts/plot_interactive.py --csv fix_metrics_time_series.csv --out hft_performance_interactive.html
 ```
+
+### Visual Telemetry Output Dashboards
+| FIX 4.2 ASCII Dashboard | Nasdaq OUCH 5.0 Binary Dashboard | CME SBE iLink 3 Binary Dashboard |
+| :---: | :---: | :---: |
+| <img src="docs/images/fix_telemetry_dashboard.png" alt="FIX 4.2 Telemetry" style="max-width: 100%; height: auto; border: 1px solid #00FFCC; border-radius: 4px;" width="380"/> | <img src="docs/images/ouch_telemetry_dashboard.png" alt="Nasdaq OUCH 5.0 Telemetry" style="max-width: 100%; height: auto; border: 1px solid #00FFCC; border-radius: 4px;" width="380"/> | <img src="docs/images/sbe_telemetry_dashboard.png" alt="CME SBE Telemetry" style="max-width: 100%; height: auto; border: 1px solid #00FFCC; border-radius: 4px;" width="380"/> |
 
 ---
 
