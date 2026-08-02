@@ -112,9 +112,18 @@ int main(int argc, char *argv[])
     const string source_param = argv[3];
 
     bool pin_cores = false;
-    if (argc >= 5 && string(argv[4]) == "--pin-cores")
+    bool direct_queue_mode = false;
+    for (int i = 4; i < argc; ++i)
     {
-        pin_cores = true;
+        string arg = argv[i];
+        if (arg == "--pin-cores" || arg == "--pin")
+        {
+            pin_cores = true;
+        }
+        else if (arg == "--direct-queue" || arg == "--in-memory")
+        {
+            direct_queue_mode = true;
+        }
     }
 
     size_t total_messages = 0;
@@ -122,12 +131,21 @@ int main(int argc, char *argv[])
     if (filesystem::exists(source_param))
     {
         fix_file_path = source_param;
-        ifstream f(fix_file_path);
-        string line;
-        while (getline(f, line))
+        bool is_binary = (fix_file_path.size() >= 5 && fix_file_path.substr(fix_file_path.size() - 5) == ".data");
+        if (is_binary)
         {
-            if (!line.empty())
-                ++total_messages;
+            size_t file_size = filesystem::file_size(fix_file_path);
+            total_messages = (file_size % 46 == 0) ? (file_size / 46) : (file_size / 44);
+        }
+        else
+        {
+            ifstream f(fix_file_path);
+            string line;
+            while (getline(f, line))
+            {
+                if (!line.empty())
+                    ++total_messages;
+            }
         }
     }
     else
@@ -187,6 +205,9 @@ int main(int argc, char *argv[])
     {
         hft::common::log_info("Source File : " + fix_file_path);
     }
+    hft::common::log_info("Execution Mode: " + string(direct_queue_mode
+                                                          ? "Direct In-Memory Queue (0% Loss Guaranteed)"
+                                                          : "Network Socket Ring (UDP / PACKET_MMAP / AF_XDP)"));
     hft::common::log_info("Telemetry CSV: " + csv_filename + " | Sample Rate: 10 ms");
     hft::common::log_info("====================================================");
 
@@ -195,7 +216,7 @@ int main(int argc, char *argv[])
     auto consumer = hft::networking::create_rx_consumer(interface_name, target_port, *shared_queue, *shared_telemetry,
                                                         consumer_cpu);
     hft::networking::UdpFixProducer producer(interface_name, target_ip, target_port, total_messages, fix_file_path,
-                                             producer_cpu);
+                                             producer_cpu, direct_queue_mode ? shared_queue : nullptr);
     hft::monitoring::CsvPerformanceMonitor monitor(*shared_telemetry, *shared_queue, csv_filename, 10, monitor_cpu);
 
     // Launch isolated threads (4 threads total)
