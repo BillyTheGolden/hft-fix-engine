@@ -1,0 +1,17 @@
+/* Custom Doxygen Responsive Styling for HFT Telemetry Dashboards */
+img, img.inline {
+    max-width: 100% !important;
+    height: auto !important;
+    display: block !important;
+    margin: 16px auto !important;
+    border: 1px solid #00FFCC !important;
+    border-radius: 6px !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+}
+
+table.markdownTable img, table.markdownTable img.inline {
+    max-width: 100% !important;
+    height: auto !important;
+    display: inline-block !important;
+    margin: 4px auto !important;
+}

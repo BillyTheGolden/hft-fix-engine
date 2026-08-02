@@ -49,6 +49,7 @@ HTML_OUTPUT            = html
 HTML_FILE_EXTENSION    = .html
 HTML_DYNAMIC_SECTIONS  = YES
 IMAGE_PATH             = docs/images .
+HTML_EXTRA_STYLESHEET  = docs/custom.css
 GENERATE_TREEVIEW      = YES
 TREEVIEW_WIDTH         = 250
 DISABLE_INDEX          = NO
