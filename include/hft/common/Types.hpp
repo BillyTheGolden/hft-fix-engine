@@ -93,6 +93,12 @@ namespace hft::common
     extern AlignedAtomicFlag g_consumer_done;
 
     /**
+     * @brief Global flag to signal that the process was interrupted/stopped by user signal (SIGINT / SIGTERM).
+     * @details Aligned to 64-byte boundary to prevent false sharing invalidations on the hot path.
+     */
+    extern AlignedAtomicFlag g_user_stopped;
+
+    /**
      * @struct FixMessagePacket
      * @brief Cache-aligned packet container transferred via the lock-free SPSC queue.
      * @details Designed to avoid heap allocations (`new`/`malloc`) when passing network payloads between threads.

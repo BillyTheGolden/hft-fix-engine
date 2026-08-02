@@ -12,6 +12,7 @@ namespace hft::common
     AlignedAtomicFlag g_running{true};
     AlignedAtomicFlag g_producer_done{false};
     AlignedAtomicFlag g_consumer_done{false};
+    AlignedAtomicFlag g_user_stopped{false};
 
     double g_cycles_per_ns = 1.0;
 

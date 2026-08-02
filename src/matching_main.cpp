@@ -30,6 +30,7 @@ static void handle_signal(int signum) noexcept
 {
     if (signum == SIGINT || signum == SIGTERM)
     {
+        hft::common::g_user_stopped.store(true, memory_order_release);
         hft::common::g_running.store(false, memory_order_release);
     }
 }
@@ -98,6 +99,7 @@ int main(int argc, char *argv[])
     hft::common::g_running.store(true, memory_order_relaxed);
     hft::common::g_producer_done.store(false, memory_order_relaxed);
     hft::common::g_consumer_done.store(false, memory_order_relaxed);
+    hft::common::g_user_stopped.store(false, memory_order_relaxed);
 
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
@@ -344,6 +346,13 @@ int main(int argc, char *argv[])
     hft::common::deallocate_huge_pages(shared_queue);
     hft::common::deallocate_huge_pages(shared_telemetry);
 
-    cout << "[main] HFT Order Matching Engine cleanly shut down. Log output written to: " << log_filename << "\n";
+    if (hft::common::g_user_stopped.load(memory_order_acquire))
+    {
+        cout << "\n[main] Process was stopped by the user (SIGINT/SIGTERM received).\n";
+    }
+    else
+    {
+        cout << "[main] HFT Order Matching Engine cleanly shut down. Log output written to: " << log_filename << "\n";
+    }
     return EXIT_SUCCESS;
 }
