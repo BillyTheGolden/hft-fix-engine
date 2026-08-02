@@ -70,6 +70,9 @@ namespace hft::order_book_engine
     /**
      * @class HftOrderBookEngine
      * @brief Core worker thread orchestrating packet parsing, risk gates, L1/L2 matching, and BBO telemetry.
+     * @details Configures `SCHED_FIFO` real-time scheduling (priority 80), CPU core affinity pinning, and kernel
+     *          thread naming via `apply_realtime_thread_settings()`. Leverages `ZeroAllocHftOrderBook` to execute
+     *          L1/L2 limit order book matching with zero dynamic memory allocations on the hot path.
      */
     class HftOrderBookEngine
     {
@@ -113,6 +116,12 @@ namespace hft::order_book_engine
             }
         }
 
+        /**
+         * @brief Executes the capstone order book ingestion, risk gate, matching, and telemetry loop.
+         * @details Applies `apply_realtime_thread_settings(m_cpu_pin, 80, "hft_ob_engine")` at startup to eliminate
+         *          Linux CFS preemption jitter and lock core affinity. Uses hardware L1 prefetch lookahead and
+         * vectorized SPSC queue batch popping (`pop_batch`) for high throughput.
+         */
         void run();
 
         [[nodiscard]] TopOfBookSnapshot get_top_of_book_snapshot() const noexcept;

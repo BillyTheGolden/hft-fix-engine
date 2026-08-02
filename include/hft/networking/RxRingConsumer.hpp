@@ -34,7 +34,8 @@ namespace hft::networking
      * @brief Zero-copy receiver utilizing Linux `AF_PACKET` with `PACKET_RX_RING` (`tpacket_v2`).
      * @details Binds to a network interface at Layer 2, maps kernel packet buffers into user memory (`mmap`),
      *          manually strips Ethernet/IP/UDP headers without kernel network stack processing, and pushes
-     *          extracted payloads into an ultra-low-latency `SPSCQueue`.
+     *          extracted payloads into an ultra-low-latency `SPSCQueue`. Applies `SCHED_FIFO` real-time scheduling
+     *          (priority 80) and CPU pinning via `apply_realtime_thread_settings()` on startup.
      */
     class PacketMmapRxConsumer final : public IRxConsumer
     {
@@ -55,6 +56,9 @@ namespace hft::networking
 
         /**
          * @brief Executes the busy-polling ring buffer consumption loop.
+         * @details Applies `apply_realtime_thread_settings(m_cpu_pin, 80, "hft_rx_ring")` as its first action
+         *          to lock thread affinity and elevate to `SCHED_FIFO` real-time scheduling class, eliminating
+         *          OS preemption jitter at the network ingestion head.
          */
         void run() override;
 

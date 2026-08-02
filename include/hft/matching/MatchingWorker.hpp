@@ -32,6 +32,10 @@ namespace hft::matching
      * @class MatchingWorker
      * @brief Dedicated worker thread executing real-time FIX/OUCH/SBE parsing, resilience scenario detection,
      *        pre-trade risk validation, and order book trade matching.
+     * @details Activates `SCHED_FIFO` real-time scheduling (priority 80), CPU core affinity pinning, and kernel
+     *          thread naming via `apply_realtime_thread_settings()`. Operates on a pre-allocated trade execution
+     *          vector (`trades.reserve(16)`) and `trades.clear()` to eliminate dynamic heap allocations (`malloc`)
+     *          from the packet processing hot path.
      */
     class MatchingWorker
     {
@@ -45,6 +49,13 @@ namespace hft::matching
         MatchingWorker(const MatchingWorker &) = delete;
         MatchingWorker &operator=(const MatchingWorker &) = delete;
 
+        /**
+         * @brief Executes the main multi-protocol order parsing, pre-trade risk evaluation, and order matching loop.
+         * @details Applies `apply_realtime_thread_settings(m_cpu_pin, 80, "hft_matcher")` as its first action to
+         *          lock thread affinity and prevent OS scheduler preemption jitter under Linux CFS. Reuses a
+         * pre-allocated `std::vector<TradeExecution>` buffer (`trades.clear()`) per packet iteration to guarantee zero
+         * heap allocations during trade matching execution.
+         */
         void run();
 
         [[nodiscard]] uint64_t total_trades() const noexcept
