@@ -102,7 +102,7 @@ namespace hft::networking
                     break;
 
                 hft::common::FixMessagePacket pkt{};
-                pkt.payload_len = static_cast<uint32_t>(std::min(msg.size(), hft::common::MAX_PAYLOAD_LEN));
+                pkt.payload_len = static_cast<uint16_t>(std::min(msg.size(), hft::common::MAX_PAYLOAD_LEN));
                 pkt.payload = const_cast<char *>(msg.data());
                 pkt.rx_timestamp_cycles = hft::common::rdtsc();
                 pkt.ring_hdr = nullptr;

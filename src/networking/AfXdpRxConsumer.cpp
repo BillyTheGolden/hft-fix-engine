@@ -10,6 +10,7 @@
 #include "hft/common/ConsoleLogger.hpp"
 #include "hft/common/SystemOptimizations.hpp"
 
+#include <cstring>
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
 #include <net/if.h>
@@ -18,18 +19,18 @@
 #include <poll.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <cstring>
 
 namespace hft::networking
 {
     using namespace std;
 
     AfXdpRxConsumer::AfXdpRxConsumer(string interface_name, uint16_t filter_port,
-        hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192>& queue,
-        hft::monitoring::TelemetryCounters& telemetry, int cpu_pin)
+                                     hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192> &queue,
+                                     hft::monitoring::TelemetryCounters &telemetry, int cpu_pin)
         : m_interface_name(std::move(interface_name)), m_filter_port(filter_port), m_queue(queue),
-        m_telemetry(telemetry), m_cpu_pin(cpu_pin)
-    {}
+          m_telemetry(telemetry), m_cpu_pin(cpu_pin)
+    {
+    }
 
     AfXdpRxConsumer::~AfXdpRxConsumer()
     {
@@ -61,8 +62,8 @@ namespace hft::networking
         m_umem_size = NUM_FRAMES * FRAME_SIZE;
 
         // Allocate contiguous UMEM memory aligned to system page size
-        m_umem_buffer = mmap(nullptr, m_umem_size, PROT_READ | PROT_WRITE,
-            MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE, -1, 0);
+        m_umem_buffer =
+            mmap(nullptr, m_umem_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE, -1, 0);
 
         if (m_umem_buffer == MAP_FAILED)
         {
@@ -71,7 +72,7 @@ namespace hft::networking
             return false;
         }
 
-        struct xsk_umem_config umem_cfg {};
+        struct xsk_umem_config umem_cfg{};
         memset(&umem_cfg, 0, sizeof(umem_cfg));
         umem_cfg.fill_size = NUM_FRAMES;
         umem_cfg.comp_size = NUM_FRAMES;
@@ -104,7 +105,7 @@ namespace hft::networking
         xsk_ring_prod__submit(&m_fq, NUM_FRAMES);
 
         // Attempt XSK Socket creation - Try Native Zero-Copy first
-        struct xsk_socket_config xsk_cfg {};
+        struct xsk_socket_config xsk_cfg{};
         memset(&xsk_cfg, 0, sizeof(xsk_cfg));
         xsk_cfg.rx_size = NUM_FRAMES;
         xsk_cfg.tx_size = NUM_FRAMES;
@@ -118,11 +119,13 @@ namespace hft::networking
         if (ret == 0)
         {
             m_is_native = true;
-            hft::common::log_info("[AfXdpRxConsumer] AF_XDP initialized successfully in NATIVE HARDWARE ZERO-COPY MODE!");
+            hft::common::log_info(
+                "[AfXdpRxConsumer] AF_XDP initialized successfully in NATIVE HARDWARE ZERO-COPY MODE!");
         }
         else
         {
-            hft::common::log_warn("[AfXdpRxConsumer] Note: Native DRV Zero-Copy not supported by driver/NIC. Trying Generic SKB Mode...");
+            hft::common::log_warn(
+                "[AfXdpRxConsumer] Note: Native DRV Zero-Copy not supported by driver/NIC. Trying Generic SKB Mode...");
             xsk_cfg.xdp_flags = XDP_FLAGS_SKB_MODE;
             xsk_cfg.bind_flags = XDP_COPY;
 
@@ -134,7 +137,9 @@ namespace hft::networking
             }
             else
             {
-                hft::common::log_warn("[AfXdpRxConsumer] Warning: xsk_socket__create failed in Generic SKB Mode (code " + to_string(ret) + "). AF_XDP unavailable.");
+                hft::common::log_warn(
+                    "[AfXdpRxConsumer] Warning: xsk_socket__create failed in Generic SKB Mode (code " + to_string(ret) +
+                    "). AF_XDP unavailable.");
                 cleanup();
                 return false;
             }
@@ -170,9 +175,10 @@ namespace hft::networking
         constexpr uint32_t SPIN_LIMIT = 2'000'000;
 
         int xsk_fd = xsk_socket__fd(m_xsk);
-        struct pollfd pfd { .fd = xsk_fd, .events = POLLIN, .revents = 0 };
+        struct pollfd pfd{.fd = xsk_fd, .events = POLLIN, .revents = 0};
 
-        hft::common::log_info("[AfXdpRxConsumer] Starting busy-polling AF_XDP extraction loop on port " + to_string(m_filter_port) + "...");
+        hft::common::log_info("[AfXdpRxConsumer] Starting busy-polling AF_XDP extraction loop on port " +
+                              to_string(m_filter_port) + "...");
 
         while (hft::common::g_running.load(memory_order_relaxed))
         {
@@ -185,7 +191,8 @@ namespace hft::networking
                     ++empty_checks;
                     if (empty_checks >= 200)
                     {
-                        hft::common::log_info("[AfXdpRxConsumer] Inactivity timeout after producer completed. Terminating.");
+                        hft::common::log_info(
+                            "[AfXdpRxConsumer] Inactivity timeout after producer completed. Terminating.");
                         break;
                     }
                 }
@@ -222,35 +229,36 @@ namespace hft::networking
 
             for (size_t i = 0; i < rcvd; ++i)
             {
-                const struct xdp_desc* desc = xsk_ring_cons__rx_desc(&m_rx, rx_idx + static_cast<uint32_t>(i));
+                const struct xdp_desc *desc = xsk_ring_cons__rx_desc(&m_rx, rx_idx + static_cast<uint32_t>(i));
                 uint64_t addr = desc->addr;
                 uint32_t len = desc->len;
 
-                auto* raw_frame = static_cast<uint8_t*>(m_umem_buffer) + addr;
+                auto *raw_frame = static_cast<uint8_t *>(m_umem_buffer) + addr;
 
                 // Layer 2/3/4 Zero-Copy Header Stripping
                 if (len >= sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr))
                 {
-                    auto* eth = reinterpret_cast<struct ethhdr*>(raw_frame);
+                    auto *eth = reinterpret_cast<struct ethhdr *>(raw_frame);
                     if (eth->h_proto == eth_p_ip_nbo)
                     {
-                        auto* ip = reinterpret_cast<struct iphdr*>(raw_frame + sizeof(struct ethhdr));
+                        auto *ip = reinterpret_cast<struct iphdr *>(raw_frame + sizeof(struct ethhdr));
                         if (ip->protocol == IPPROTO_UDP)
                         {
                             uint32_t ip_hdr_len = ip->ihl * 4;
-                            auto* udp = reinterpret_cast<struct udphdr*>(raw_frame + sizeof(struct ethhdr) + ip_hdr_len);
+                            auto *udp =
+                                reinterpret_cast<struct udphdr *>(raw_frame + sizeof(struct ethhdr) + ip_hdr_len);
 
                             if (udp->dest == filter_port_nbo)
                             {
-                                uint8_t* payload = reinterpret_cast<uint8_t*>(udp) + sizeof(struct udphdr);
-                                uint32_t payload_len = static_cast<uint32_t>(ntohs(udp->len) - sizeof(struct udphdr));
+                                uint8_t *payload = reinterpret_cast<uint8_t *>(udp) + sizeof(struct udphdr);
+                                uint16_t payload_len = static_cast<uint16_t>(ntohs(udp->len) - sizeof(struct udphdr));
 
                                 if (payload_len > 0 && payload_len <= hft::common::MAX_PAYLOAD_LEN)
                                 {
                                     hft::common::FixMessagePacket pkt;
                                     pkt.rx_timestamp_cycles = rx_ts;
                                     pkt.payload_len = payload_len;
-                                    pkt.payload = reinterpret_cast<char*>(payload);
+                                    pkt.payload = reinterpret_cast<char *>(payload);
                                     pkt.ring_hdr = nullptr;
 
                                     while (!m_queue.push(pkt) && hft::common::g_running.load(memory_order_relaxed))

@@ -203,7 +203,7 @@ namespace hft::networking
                     uint64_t rx_ts = hft::common::rdtsc();
                     hft::common::FixMessagePacket pkt;
                     pkt.rx_timestamp_cycles = rx_ts;
-                    pkt.payload_len = static_cast<uint32_t>(n);
+                    pkt.payload_len = static_cast<uint16_t>(n);
                     pkt.payload = current_buf;
                     pkt.ring_hdr = nullptr;
 
@@ -280,7 +280,7 @@ namespace hft::networking
                     if (udp->dest == filter_port_nbo)
                     {
                         uint8_t *payload = reinterpret_cast<uint8_t *>(udp) + sizeof(struct udphdr);
-                        uint32_t payload_len = static_cast<uint32_t>(ntohs(udp->len) - sizeof(struct udphdr));
+                        uint16_t payload_len = static_cast<uint16_t>(ntohs(udp->len) - sizeof(struct udphdr));
 
                         if (payload_len > 0 && payload_len <= hft::common::MAX_PAYLOAD_LEN)
                         {

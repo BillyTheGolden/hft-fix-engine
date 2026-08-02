@@ -52,11 +52,6 @@ namespace hft::networking
          */
         void run() override;
 
-        /**
-         * @brief Executes the generation/loading and UDP `sendto` loop until queue is empty.
-         */
-        void run() override;
-
       private:
         std::string m_interface_name;
         std::string m_target_ip;

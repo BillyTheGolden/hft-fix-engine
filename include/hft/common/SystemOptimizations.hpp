@@ -168,7 +168,7 @@ namespace hft::common
         // ── Step 2: SCHED_FIFO Real-Time Scheduling ──────────────────────────────────────────────
         // Promote this thread from the CFS time-sharing class to SCHED_FIFO real-time class.
         // This is the single most impactful change for worst-case latency: it eliminates the OS
-        // scheduler from preempting this thread mid-loop (which normally occurs every 1–4 ms under CFS).
+        // scheduler from preempting this thread mid-loop (which normally occurs every 1-4 ms under CFS).
         //
         // Priority 80 is used: safe for production (below kernel watchdog at 99), yet high enough to
         // supersede all normal-priority threads and other realtime tasks at priority ≤ 79.
@@ -213,9 +213,9 @@ namespace hft::common
      *          swapped page:
      *          1. A **major page fault** is triggered (hardware exception).
      *          2. The kernel must perform a synchronous disk I/O to load the page back.
-     *          3. The faulting thread is **blocked** for the duration — typically **1–10 ms**.
+     *          3. The faulting thread is **blocked** for the duration — typically **1-10 ms**.
      *
-     *          For context: the entire target latency of the engine is 500–2000 ns. A single major
+     *          For context: the entire target latency of the engine is 500-2000 ns. A single major
      *          page fault on a hot-path address is a **1000× latency spike**.
      *
      *          ### What `MCL_CURRENT | MCL_FUTURE` Locks
@@ -285,20 +285,14 @@ namespace hft::common
 
         if (ptr == MAP_FAILED)
         {
-            // Fallback to standard anonymous mmap if huge pages are not configured/available on the system.
-            // MAP_POPULATE pre-faults all pages into physical RAM at creation time rather than taking
-            // page faults on demand during the matching loop.
-            ptr =
-                mmap(nullptr, rounded_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE, -1, 0);
+            // Fallback to standard anonymous mmap if huge pages are not configured/available on the system
+            ptr = mmap(nullptr, rounded_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
             if (ptr == MAP_FAILED)
             {
                 return nullptr;
             }
             std::cerr << "[SystemOptimizations] Warning: Failed to allocate huge pages. Fell back to standard pages.\n";
         }
-
-        // Lock allocated memory pages into RAM to prevent kernel swapping under memory pressure
-        mlock(ptr, rounded_size);
 
         // Construct object in-place (placement new)
         return ::new (ptr) T(std::forward<Args>(args)...);

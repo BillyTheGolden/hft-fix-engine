@@ -95,7 +95,7 @@ int main(int argc, char *argv[])
     // infrequently-executed code paths, BSS globals, or heap arenas) under memory pressure.
     // When those pages are subsequently accessed — including on the hot matching path — a
     // major page fault is triggered: the kernel must perform synchronous disk I/O to reload
-    // the page. This typically takes 1–10 ms, completely obliterating latency targets.
+    // the page. This typically takes 1-10 ms, completely obliterating latency targets.
     //
     // MCL_FUTURE ensures that every mmap created after this call (huge-page SPSC queue,
     // PACKET_MMAP ring buffer, UMEM buffer) is also immediately pinned — no separate mlock()

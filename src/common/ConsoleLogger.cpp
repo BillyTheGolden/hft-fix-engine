@@ -5,6 +5,7 @@
 
 #include "hft/common/ConsoleLogger.hpp"
 
+#include <cstring>
 #include <format>
 #include <iostream>
 #include <sys/ioctl.h>
