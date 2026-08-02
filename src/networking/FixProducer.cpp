@@ -10,6 +10,8 @@
 #include <arpa/inet.h>
 #include <format>
 #include <fstream>
+#include <net/if.h>
+#include <sys/ioctl.h>
 
 namespace hft::networking
 {
@@ -146,21 +148,25 @@ namespace hft::networking
             hft::common::log_warn("[FixProducer] Warning: Failed to set IP_MULTICAST_TTL option.");
         }
 
-        // 2. Bind socket specifically to target interface (handling veth peer auto-routing for single-instance mode)
+        // 2. Bind socket specifically to target interface via SO_BINDTODEVICE & IP_MULTICAST_IF
         std::string bind_iface = m_interface_name;
-        if (m_direct_queue == nullptr && bind_iface.rfind("veth", 0) == 0)
+        if (!bind_iface.empty())
         {
-            if (bind_iface == "veth1")
-                bind_iface = "veth0";
-            else if (bind_iface == "veth0")
-                bind_iface = "veth1";
-        }
+            if (setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, bind_iface.c_str(),
+                           static_cast<socklen_t>(bind_iface.length())) < 0)
+            {
+                hft::common::log_warn("[FixProducer] Warning: Failed to bind UDP producer to device '" + bind_iface +
+                                      "'. Ensure root/sudo privileges.");
+            }
 
-        if (!bind_iface.empty() && setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, bind_iface.c_str(),
-                                              static_cast<socklen_t>(bind_iface.length())) < 0)
-        {
-            hft::common::log_warn("[FixProducer] Warning: Failed to bind UDP producer to device '" + bind_iface +
-                                  "'. Ensure root/sudo privileges.");
+            struct ifreq ifr{};
+            memset(&ifr, 0, sizeof(ifr));
+            strncpy(ifr.ifr_name, bind_iface.c_str(), IFNAMSIZ - 1);
+            if (ioctl(sock, SIOCGIFADDR, &ifr) == 0)
+            {
+                struct sockaddr_in *sa = reinterpret_cast<struct sockaddr_in *>(&ifr.ifr_addr);
+                setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF, &sa->sin_addr, sizeof(sa->sin_addr));
+            }
         }
 
         struct sockaddr_in target_addr{};

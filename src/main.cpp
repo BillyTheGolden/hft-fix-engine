@@ -198,6 +198,14 @@ int main(int argc, char *argv[])
         tx_interface = rx_interface;
     }
 
+    if (tx_interface == rx_interface && rx_interface.starts_with("veth"))
+    {
+        if (rx_interface == "veth1")
+            tx_interface = "veth0";
+        else if (rx_interface == "veth0")
+            tx_interface = "veth1";
+    }
+
     if (!direct_queue_mode && rx_interface == tx_interface && rx_interface != "lo" && !rx_interface.starts_with("veth"))
     {
         cerr << "\n===================================================================================================="
