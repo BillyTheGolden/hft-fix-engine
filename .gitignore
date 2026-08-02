@@ -13,11 +13,12 @@ docs/latex/
 # Synthetic benchmark data files (>1GB) and logs
 *.log
 *.csv
-fix_messages_*.txt
-ouch_messages_*.data
-sbe_messages_*.data
-test_book_sbe_*.data
-test_fix_*.txt
+*.data
+*.txt
+*.png
+
+# Temporary stream and scratch files
+*.temp-stream-*
 
 # Ignored Hackerrank files
 src/hackerrank_*
