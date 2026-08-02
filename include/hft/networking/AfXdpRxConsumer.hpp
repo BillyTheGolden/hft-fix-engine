@@ -49,6 +49,7 @@ namespace hft::networking
          * @param queue Shared lock-free SPSC queue for payload dispatching.
          * @param telemetry Telemetry counters for metric tracking.
          * @param cpu_pin CPU core ID for thread affinity (-1 for unpinned).
+         * @param queue_id Target hardware/virtual RX queue index (default: 0).
          */
         AfXdpRxConsumer(std::string interface_name, uint16_t filter_port,
                         hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192> &queue,

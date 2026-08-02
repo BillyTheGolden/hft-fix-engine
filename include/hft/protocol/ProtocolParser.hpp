@@ -28,6 +28,12 @@ namespace hft::protocol
         SBE   ///< CME iLink 3 Simple Binary Encoding (SBE)
     };
 
+    /**
+     * @brief Parses and auto-detects the ProtocolType from a string name or input dataset file path.
+     * @param name String identifier or dataset file path (e.g., "ouch", "sbe", "./ouch_messages_10m.data").
+     * @return `ProtocolType::OUCH` if "ouch" is found, `ProtocolType::SBE` if "sbe" is found, otherwise
+     * `ProtocolType::FIX`.
+     */
     inline ProtocolType parse_protocol_type(std::string_view name) noexcept
     {
         std::string s(name);
