@@ -11,6 +11,7 @@
 #include "hft/common/SystemOptimizations.hpp"
 
 #include <cstring>
+#include <filesystem>
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
 #include <net/if.h>
@@ -23,6 +24,29 @@
 namespace hft::networking
 {
     using namespace std;
+
+    static uint32_t get_interface_rx_queue_count(const string &iface)
+    {
+        string path = "/sys/class/net/" + iface + "/queues/";
+        if (!filesystem::exists(path))
+            return 1;
+
+        uint32_t count = 0;
+        try
+        {
+            for (const auto &entry : filesystem::directory_iterator(path))
+            {
+                if (entry.is_directory() && entry.path().filename().string().starts_with("rx-"))
+                {
+                    ++count;
+                }
+            }
+        }
+        catch (...)
+        {
+        }
+        return (count > 0) ? count : 1;
+    }
 
     AfXdpRxConsumer::AfXdpRxConsumer(string interface_name, uint16_t filter_port,
                                      hft::common::SPSCQueue<hft::common::FixMessagePacket, 8192> &queue,
@@ -113,7 +137,17 @@ namespace hft::networking
         xsk_cfg.xdp_flags = XDP_FLAGS_DRV_MODE;
         xsk_cfg.bind_flags = XDP_ZEROCOPY;
 
+        uint32_t max_queues = get_interface_rx_queue_count(m_interface_name);
         uint32_t queue_id = m_queue_id;
+        if (queue_id >= max_queues)
+        {
+            hft::common::log_warn("[AfXdpRxConsumer] Warning: Requested queue_id " + std::to_string(queue_id) +
+                                  " exceeds interface '" + m_interface_name + "' total RX queues (" +
+                                  std::to_string(max_queues) + "). Resetting queue_id to 0.");
+            queue_id = 0;
+            m_queue_id = 0;
+        }
+
         ret = xsk_socket__create(&m_xsk, m_interface_name.c_str(), queue_id, m_umem, &m_rx, &m_tx, &xsk_cfg);
 
         if (ret == 0)
