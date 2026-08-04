@@ -15,10 +15,16 @@ docs/latex/
 *.csv
 *.data
 *.txt
-*.png
+*_time_series.png
+*_performance.png
+*_dashboard.png
 
 # Temporary stream and scratch files
 *.temp-stream-*
+
+# Do NOT ignore build configuration and documentation assets
+!CMakeLists.txt
+!docs/images/*.png
 
 # Ignored Hackerrank files
 src/hackerrank_*
