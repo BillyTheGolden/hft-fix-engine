@@ -211,6 +211,15 @@ python3 scripts/plot_interactive.py --csv fix_metrics_time_series.csv --out hft_
 | :---: | :---: | :---: |
 | ![FIX 4.2 Telemetry](docs/images/fix_telemetry_dashboard.png) | ![Nasdaq OUCH 5.0 Telemetry](docs/images/ouch_telemetry_dashboard.png) | ![CME SBE Telemetry](docs/images/sbe_telemetry_dashboard.png) |
 
+### 📖 How to Interpret the 4-Panel Telemetry Dashboard
+
+| Quadrant / Panel | Metric Tracked | Target HFT Behavior | Key Diagnostic Takeaway |
+|---|---|---|---|
+| **Top-Left** | **Instantaneous Processing Throughput** *(msgs/sec)* | High, flat throughput baseline (~200k–250k msgs/sec). | Measures real-time packet processing speed sampled every 10 ms. Transient dips indicate OS thread scheduling interrupts or background logging I/O. |
+| **Top-Right** | **Latency Breakdown** *(Log Scale Nanoseconds)* | Sub-100 ns Min Floor; flat Average line over 10M msgs. | **Min Latency (dotted)** measures pure L1-cache hit parsing speed (75–80 ns). **Avg Latency (green)** measures full end-to-end processing. A flat line proves **zero memory degradation or heap allocation pauses**. |
+| **Bottom-Left** | **Lock-Free SPSC Queue Instantaneous Depth** | Near-zero baseline (0–4 items out of 8,192 capacity). | Measures consumer backpressure. Low depth proves worker thread consumes packets in real time. **Transient spikes** demonstrate lock-free ring buffer absorbing micro-bursts without packet loss. |
+| **Bottom-Right** | **Risk Validation & Cumulative Progression** | Smooth linear slope up to 10,000,000 messages. | Tracks cumulative RX frames, total processed, risk-approved, and risk-rejected orders. Demonstrates 100% loss-free stream completion and risk gate accuracy. |
+
 ---
 
 ## 🧪 Resilience Test Arena (`test_arena`)
