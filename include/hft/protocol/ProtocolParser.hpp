@@ -158,7 +158,7 @@ namespace hft::protocol
                 order.cl_ord_id = trim_right(std::string_view(packet->cl_ord_id, 14));
                 order.symbol = trim_right(std::string_view(packet->symbol, 6));
                 order.side = (packet->side == 'B' || packet->side == '1') ? 1 : 2;
-                order.quantity = packet->quantity;
+                order.quantity = static_cast<int>(packet->quantity);
                 order.price = static_cast<int64_t>(packet->price_scaled);
                 return order;
             }
@@ -180,7 +180,7 @@ namespace hft::protocol
                     trim_right(std::string_view(reinterpret_cast<const char *>(&packet->cl_ord_id_num), 8));
                 order.symbol = trim_right(std::string_view(packet->symbol, 8));
                 order.side = static_cast<int>(packet->side);
-                order.quantity = packet->quantity;
+                order.quantity = static_cast<int>(packet->quantity);
                 order.price = static_cast<int64_t>(packet->price_scaled);
                 return order;
             }
