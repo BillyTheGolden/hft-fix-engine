@@ -17,8 +17,23 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/lib)
 
-# Compiler optimization and warning flags
-add_compile_options(-O3 -march=native -fno-rtti -funroll-loops -fomit-frame-pointer -fdata-sections -ffunction-sections -fvisibility=hidden)
+# Set default build type to Release if not specified
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    message(STATUS "No CMAKE_BUILD_TYPE specified. Defaulting to 'Release'.")
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build, options are: Debug Release RelWithDebInfo MinSizeRel." FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
+endif()
+
+message(STATUS "Configuring for Build Type: ${CMAKE_BUILD_TYPE}")
+
+# Base flags for all build configurations
+add_compile_options(-fno-rtti)
+
+# Per-build-type optimization and debugging flags
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -funroll-loops -fomit-frame-pointer -fdata-sections -ffunction-sections -fvisibility=hidden -DNDEBUG")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g -march=native -funroll-loops -fno-omit-frame-pointer -fdata-sections -ffunction-sections -DNDEBUG")
+set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -DDEBUG -g3 -fno-omit-frame-pointer -fno-inline")
+set(CMAKE_CXX_FLAGS_MINSIZEREL "-Os -march=native -fdata-sections -ffunction-sections -DNDEBUG")
 
 # Option to enable or disable NUMA library support (default ON)
 option(ENABLE_NUMA "Enable NUMA library support for thread affinity and memory allocation" ON)
