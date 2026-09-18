@@ -190,13 +190,29 @@ add_executable(hft_order_book_engine ${ENGINE_SOURCES} "src/order_book_engine_ma
 target_compile_options(hft_order_book_engine PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 target_link_options(hft_order_book_engine PRIVATE -Wl,-z,common-page-size=2097152 -Wl,-z,max-page-size=2097152)
 
+# Google Protocol Buffers Configuration
+set(protobuf_MODULE_COMPATIBLE ON)
+find_package(Protobuf CONFIG REQUIRED)
+set(PROTO_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+file(MAKE_DIRECTORY ${PROTO_GEN_DIR})
+protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS proto/telemetry.proto)
+
+add_library(hft_telemetry_proto STATIC ${PROTO_SRCS} ${PROTO_HDRS})
+target_include_directories(hft_telemetry_proto PUBLIC 
+    ${Protobuf_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_BINARY_DIR}
+    ${PROTO_GEN_DIR}
+)
+target_link_libraries(hft_telemetry_proto PUBLIC protobuf::libprotobuf)
+target_compile_options(hft_telemetry_proto PRIVATE -frtti)
+
 # Automated Google Test / Mock Executable
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/hackerrank_simulator_gtest.cpp")
     find_package(GTest QUIET)
     if(GTEST_FOUND)
         add_executable(hackerrank_gtest ${ENGINE_SOURCES} "src/hackerrank_simulator_gtest.cpp")
         target_compile_options(hackerrank_gtest PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
-        target_link_libraries(hackerrank_gtest PRIVATE GTest::gtest GTest::gtest_main GTest::gmock)
+        target_link_libraries(hackerrank_gtest PRIVATE GTest::gtest GTest::gtest_main GTest::gmock hft_telemetry_proto)
         if(ENABLE_NUMA)
             target_compile_definitions(hackerrank_gtest PRIVATE HFT_ENABLE_NUMA)
             target_link_libraries(hackerrank_gtest PRIVATE numa::numa log4cplus::log4cplus Threads::Threads)
@@ -212,17 +228,23 @@ if(ENABLE_NUMA)
     target_compile_definitions(hft_matching_engine PRIVATE HFT_ENABLE_NUMA)
     target_compile_definitions(protocol_arena PRIVATE HFT_ENABLE_NUMA)
     target_compile_definitions(hft_order_book_engine PRIVATE HFT_ENABLE_NUMA)
-    target_link_libraries(hft_fix_engine PRIVATE Threads::Threads numa::numa log4cplus::log4cplus)
-    target_link_libraries(test_arena PRIVATE Threads::Threads numa::numa log4cplus::log4cplus)
-    target_link_libraries(hft_matching_engine PRIVATE Threads::Threads numa::numa log4cplus::log4cplus)
-    target_link_libraries(protocol_arena PRIVATE Threads::Threads numa::numa log4cplus::log4cplus)
-    target_link_libraries(hft_order_book_engine PRIVATE Threads::Threads numa::numa log4cplus::log4cplus)
+    target_link_libraries(hft_fix_engine PRIVATE Threads::Threads numa::numa log4cplus::log4cplus hft_telemetry_proto)
+    target_link_libraries(test_arena PRIVATE Threads::Threads numa::numa log4cplus::log4cplus hft_telemetry_proto)
+    target_link_libraries(hft_matching_engine PRIVATE Threads::Threads numa::numa log4cplus::log4cplus hft_telemetry_proto)
+    target_link_libraries(protocol_arena PRIVATE Threads::Threads numa::numa log4cplus::log4cplus hft_telemetry_proto)
+    target_link_libraries(hft_order_book_engine PRIVATE Threads::Threads numa::numa log4cplus::log4cplus hft_telemetry_proto)
 else()
-    target_link_libraries(hft_fix_engine PRIVATE Threads::Threads log4cplus::log4cplus)
-    target_link_libraries(test_arena PRIVATE Threads::Threads log4cplus::log4cplus)
-    target_link_libraries(hft_matching_engine PRIVATE Threads::Threads log4cplus::log4cplus)
-    target_link_libraries(protocol_arena PRIVATE Threads::Threads log4cplus::log4cplus)
-    target_link_libraries(hft_order_book_engine PRIVATE Threads::Threads log4cplus::log4cplus)
+    target_link_libraries(hft_fix_engine PRIVATE Threads::Threads log4cplus::log4cplus hft_telemetry_proto)
+    target_link_libraries(test_arena PRIVATE Threads::Threads log4cplus::log4cplus hft_telemetry_proto)
+    target_link_libraries(hft_matching_engine PRIVATE Threads::Threads log4cplus::log4cplus hft_telemetry_proto)
+    target_link_libraries(protocol_arena PRIVATE Threads::Threads log4cplus::log4cplus hft_telemetry_proto)
+    target_link_libraries(hft_order_book_engine PRIVATE Threads::Threads log4cplus::log4cplus hft_telemetry_proto)
+endif()
+
+# Enable Testing & Unit Tests Subdirectory
+enable_testing()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
+    add_subdirectory(tests)
 endif()
 
 # Target for Doxygen documentation generation
