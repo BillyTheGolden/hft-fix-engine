@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package hft.telemetry;
+
+/**
+ * @enum ProtocolType
+ * @brief Identifies the active market data / trading protocol.
+ */
+enum ProtocolType {
+    PROTOCOL_UNKNOWN = 0;
+    PROTOCOL_FIX = 1;
+    PROTOCOL_OUCH = 2;
+    PROTOCOL_SBE = 3;
+}
+
+/**
+ * @message TelemetrySnapshot
+ * @brief Periodic snapshot emitted every 10ms containing all core engine telemetry.
+ */
+message TelemetrySnapshot {
+    // Monotonic timestamp in nanoseconds when this sample was captured
+    uint64 timestamp_ns = 1;
+
+    // Total elapsed time since engine start in seconds
+    double elapsed_sec = 2;
+
+    // Instantaneous message throughput (messages / second) in this sample window
+    double throughput_msg_sec = 3;
+
+    // End-to-end average latency across all processed messages (nanoseconds)
+    double avg_latency_ns = 4;
+
+    // Minimum observed latency in the current sample window (nanoseconds)
+    uint64 min_latency_ns = 5;
+
+    // Maximum observed latency in the current sample window (nanoseconds)
+    uint64 max_latency_ns = 6;
+
+    // Instantaneous fill depth of the lock-free SPSC queue (0 to 8192 capacity)
+    uint64 spsc_queue_depth = 7;
+
+    // Total raw network frames extracted from the kernel/XDP ring buffer
+    uint64 rx_frames_captured = 8;
+
+    // Cumulative count of messages parsed and processed by the worker
+    uint64 total_processed = 9;
+
+    // Cumulative count of orders approved by pre-trade risk checks
+    uint64 risk_approved = 10;
+
+    // Cumulative count of orders rejected by pre-trade risk checks
+    uint64 risk_rejected = 11;
+
+    // Cumulative average latency for risk-approved orders (nanoseconds)
+    double approved_avg_latency_ns = 12;
+
+    // Cumulative average latency for risk-rejected orders (nanoseconds)
+    double rejected_avg_latency_ns = 13;
+
+    // Active protocol type
+    ProtocolType protocol = 14;
+}
+
+/**
+ * @message TelemetryBatch
+ * @brief Container for bundling multiple snapshots or session archives.
+ */
+message TelemetryBatch {
+    repeated TelemetrySnapshot snapshots = 1;
+}

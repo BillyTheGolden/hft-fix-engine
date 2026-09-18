@@ -1,8 +1,14 @@
 # Build directories and generated binaries
 build/
 bin/
+monitoring_app/build/
+monitoring_app/bin/
 docs/html/
 docs/latex/
+
+# Generated Protocol Buffer files
+*.pb.h
+*.pb.cc
 
 # Compiled object files and libraries
 *.o
