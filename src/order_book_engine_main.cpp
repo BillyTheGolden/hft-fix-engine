@@ -370,9 +370,10 @@ int main(int argc, char *argv[])
     cout << "  [ASKS]\n";
     for (int i = static_cast<int>(bbo.ask_levels_count) - 1; i >= 0; --i)
     {
+        const auto idx = static_cast<size_t>(i);
         cout << std::format("    Ask L{} : ${:.2f} | Qty: {} | Orders: {}\n", i + 1,
-                            static_cast<double>(bbo.ask_depth[i].price) / 1e6, bbo.ask_depth[i].qty,
-                            bbo.ask_depth[i].order_count);
+                            static_cast<double>(bbo.ask_depth[idx].price) / 1e6, bbo.ask_depth[idx].qty,
+                            bbo.ask_depth[idx].order_count);
     }
     cout << "  --------------------------------------------------\n";
     cout << "  [BIDS]\n";

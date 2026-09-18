@@ -104,7 +104,7 @@ namespace hft::networking
         umem_cfg.frame_headroom = XSK_UMEM__DEFAULT_FRAME_HEADROOM;
         umem_cfg.flags = 0;
 
-        int ret = xsk_umem__create(&m_umem, m_umem_buffer, m_umem_size, &m_fq, &m_cq, &umem_cfg);
+        auto ret = xsk_umem__create(&m_umem, m_umem_buffer, m_umem_size, &m_fq, &m_cq, &umem_cfg);
         if (ret != 0)
         {
             hft::common::log_warn("[AfXdpRxConsumer] Error: xsk_umem__create failed (code " + to_string(ret) + ").");
@@ -114,8 +114,8 @@ namespace hft::networking
 
         // Populate initial Fill Ring descriptors with UMEM frame offsets
         uint32_t fq_idx = 0;
-        ret = xsk_ring_prod__reserve(&m_fq, NUM_FRAMES, &fq_idx);
-        if (ret != static_cast<int>(NUM_FRAMES))
+        uint32_t reserved = xsk_ring_prod__reserve(&m_fq, NUM_FRAMES, &fq_idx);
+        if (reserved != NUM_FRAMES)
         {
             hft::common::log_warn("[AfXdpRxConsumer] Error: Failed to reserve Fill Ring frames.");
             cleanup();
