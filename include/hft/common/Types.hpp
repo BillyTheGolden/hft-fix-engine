@@ -100,10 +100,11 @@ namespace hft::common
 
     /**
      * @struct FixMessagePacket
-     * @brief Cache-aligned packet container transferred via the lock-free SPSC queue.
-     * @details Designed to avoid heap allocations (`new`/`malloc`) when passing network payloads between threads.
+     * @brief Compact 32-byte packet container transferred via the lock-free SPSC queue.
+     * @details Packs naturally into 32 bytes (2 packets per 64-byte L1 cache line) to minimize
+     *          L1/L2 cache footprint and avoid artificial padding bloat.
      */
-    struct alignas(64) FixMessagePacket
+    struct FixMessagePacket
     {
         /** @brief CPU cycle count recorded exactly when the frame was read from the kernel ring. */
         uint64_t rx_timestamp_cycles{0};
@@ -131,18 +132,16 @@ namespace hft::common
     }
 
     /**
-     * @brief Reads the Time-Stamp Counter (RDTSC) directly from the processor register.
-     * @details Provides sub-nanosecond cycle counts for micro-benchmarking inside critical loops.
-     * @return CPU cycle count from the `__rdtsc()` intrinsic or fallback.
+     * @brief Reads the Time-Stamp Counter (RDTSC) with hardware instruction serialization.
+     * @details Uses `__rdtscp` on x86_64 to prevent speculative out-of-order instruction reordering
+     *          around the measurement boundary, providing accurate nanosecond cycle counts.
+     * @return CPU cycle count from the `__rdtscp()` intrinsic or fallback.
      */
     [[nodiscard]] inline uint64_t rdtsc() noexcept
     {
-#ifdef __GNUC__
-#ifdef __x86_64__
-        return __rdtsc();
-#else
-        return get_timestamp_ns();
-#endif
+#if defined(__x86_64__) || defined(_M_X64)
+        unsigned int aux = 0;
+        return __rdtscp(&aux);
 #else
         return get_timestamp_ns();
 #endif

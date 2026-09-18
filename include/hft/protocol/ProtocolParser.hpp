@@ -9,10 +9,10 @@
 #include "hft/protocol/FixParser.hpp"
 #include "hft/protocol/ParsedOrder.hpp"
 
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <string>
 #include <string_view>
 
 namespace hft::protocol
@@ -29,6 +29,38 @@ namespace hft::protocol
     };
 
     /**
+     * @brief Zero-allocation, constexpr case-insensitive substring search.
+     */
+    inline constexpr bool contains_ci(std::string_view haystack, std::string_view needle) noexcept
+    {
+        if (needle.empty())
+            return true;
+        if (haystack.size() < needle.size())
+            return false;
+        for (size_t i = 0; i <= haystack.size() - needle.size(); ++i)
+        {
+            bool match = true;
+            for (size_t j = 0; j < needle.size(); ++j)
+            {
+                char h = haystack[i + j];
+                char n = needle[j];
+                if (h >= 'A' && h <= 'Z')
+                    h = static_cast<char>(h + ('a' - 'A'));
+                if (n >= 'A' && n <= 'Z')
+                    n = static_cast<char>(n + ('a' - 'A'));
+                if (h != n)
+                {
+                    match = false;
+                    break;
+                }
+            }
+            if (match)
+                return true;
+        }
+        return false;
+    }
+
+    /**
      * @brief Parses and auto-detects the ProtocolType from a string name or input dataset file path.
      * @param name String identifier or dataset file path (e.g., "ouch", "sbe", "./ouch_messages_10m.data").
      * @return `ProtocolType::OUCH` if "ouch" is found, `ProtocolType::SBE` if "sbe" is found, otherwise
@@ -36,15 +68,9 @@ namespace hft::protocol
      */
     inline ProtocolType parse_protocol_type(std::string_view name) noexcept
     {
-        std::string s(name);
-        for (char &c : s)
-        {
-            c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
-        }
-
-        if (s.find("ouch") != std::string::npos)
+        if (contains_ci(name, "ouch"))
             return ProtocolType::OUCH;
-        if (s.find("sbe") != std::string::npos)
+        if (contains_ci(name, "sbe"))
             return ProtocolType::SBE;
         return ProtocolType::FIX;
     }
@@ -148,18 +174,22 @@ namespace hft::protocol
                     return ParsedOrder{};
                 }
 
-                // Zero-Copy Direct C-Struct Pointer Cast! O(1) Parsing
-                const auto *packet = reinterpret_cast<const OuchEnterOrderPacket *>(payload);
+                // Portable, strict-aliasing compliant copy into local stack struct
+                // (Compilers auto-vectorize fixed-size memcpy into zero-cost register moves)
+                OuchEnterOrderPacket packet{};
+                std::memcpy(&packet, payload, sizeof(OuchEnterOrderPacket));
 
                 ParsedOrder order{};
                 order.msg_type = "D";
                 order.msg_type_char = 'D';
-                order.seq_num = packet->seq_num;
-                order.cl_ord_id = trim_right(std::string_view(packet->cl_ord_id, 14));
-                order.symbol = trim_right(std::string_view(packet->symbol, 6));
-                order.side = (packet->side == 'B' || packet->side == '1') ? 1 : 2;
-                order.quantity = static_cast<int>(packet->quantity);
-                order.price = static_cast<int64_t>(packet->price_scaled);
+                order.seq_num = packet.seq_num;
+                order.cl_ord_id = trim_right(
+                    std::string_view(payload + offsetof(OuchEnterOrderPacket, cl_ord_id), sizeof(packet.cl_ord_id)));
+                order.symbol = trim_right(
+                    std::string_view(payload + offsetof(OuchEnterOrderPacket, symbol), sizeof(packet.symbol)));
+                order.side = (packet.side == 'B' || packet.side == '1') ? 1 : 2;
+                order.quantity = static_cast<int>(packet.quantity);
+                order.price = static_cast<int64_t>(packet.price_scaled);
                 return order;
             }
 
@@ -169,19 +199,30 @@ namespace hft::protocol
                     return ParsedOrder{};
                 }
 
-                // Zero-Copy Direct C-Struct Pointer Cast! O(1) Parsing
-                const auto *packet = reinterpret_cast<const SbeNewOrderSinglePacket *>(payload);
+                // Portable, strict-aliasing compliant copy into local stack struct
+                SbeNewOrderSinglePacket packet{};
+                std::memcpy(&packet, payload, sizeof(SbeNewOrderSinglePacket));
 
                 ParsedOrder order{};
                 order.msg_type = "D";
                 order.msg_type_char = 'D';
-                order.seq_num = packet->seq_num;
-                order.cl_ord_id =
-                    trim_right(std::string_view(reinterpret_cast<const char *>(&packet->cl_ord_id_num), 8));
-                order.symbol = trim_right(std::string_view(packet->symbol, 8));
-                order.side = static_cast<int>(packet->side);
-                order.quantity = static_cast<int>(packet->quantity);
-                order.price = static_cast<int64_t>(packet->price_scaled);
+                order.seq_num = packet.seq_num;
+
+                // Fast zero-allocation format of numeric cl_ord_id_num into inline buffer
+                auto [ptr, ec] = std::to_chars(
+                    order.cl_ord_id_buf, order.cl_ord_id_buf + sizeof(order.cl_ord_id_buf) - 1, packet.cl_ord_id_num);
+                if (ec == std::errc{})
+                {
+                    *ptr = '\0';
+                    order.cl_ord_id =
+                        std::string_view(order.cl_ord_id_buf, static_cast<size_t>(ptr - order.cl_ord_id_buf));
+                }
+
+                order.symbol = trim_right(
+                    std::string_view(payload + offsetof(SbeNewOrderSinglePacket, symbol), sizeof(packet.symbol)));
+                order.side = static_cast<int>(packet.side);
+                order.quantity = static_cast<int>(packet.quantity);
+                order.price = static_cast<int64_t>(packet.price_scaled);
                 return order;
             }
 

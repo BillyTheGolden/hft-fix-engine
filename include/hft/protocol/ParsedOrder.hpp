@@ -47,6 +47,9 @@ namespace hft::protocol
 
         /** @brief Elapsed nanoseconds measured from RX Ring kernel departure to parser completion. */
         uint64_t latency_ns{0};
+
+        /** @brief Small inline buffer to back string views of binary numeric identifiers without heap allocation. */
+        char cl_ord_id_buf[24]{'\0'};
     };
 
 } // namespace hft::protocol

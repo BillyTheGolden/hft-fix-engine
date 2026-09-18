@@ -1,6 +1,9 @@
 /**
  * @file ZeroAllocHftOrderBook.hpp
  * @brief Zero-Allocation High-Frequency Price-Time Priority Limit Order Book.
+ * @details Implements O(1) order pops via circular FIFO ring indexing within price levels,
+ *          and pointer-indirected price level arrays backed by pre-allocated memory pools
+ *          to eliminate hot-path memory shift cascades.
  */
 
 #pragma once
@@ -37,9 +40,9 @@ namespace hft::matching
 
     /**
      * @struct BookOrder
-     * @brief Flat, cache-aligned (64 bytes) order node stored in the limit book.
+     * @brief Flat order node stored in the limit book.
      */
-    struct alignas(64) BookOrder
+    struct BookOrder
     {
         uint64_t order_id{0};
         char cl_ord_id[MAX_CL_ORD_ID_LEN]{'\0'};
@@ -57,15 +60,6 @@ namespace hft::matching
         dest[len] = '\0';
     }
 
-    /**
-     * @brief High-performance vectorised string copying wrapper.
-     *
-     * @details OPTIMIZATION (High Finding 1.6):
-     *          Replaces the scalar character-by-character while loop (`while (len < max_len && src[len] != '\0')`)
-     *          with `strnlen()` followed by `std::memcpy()`.
-     *          Eliminates branch mispredictions inside the inner copy loop and enables compiler SIMD auto-vectorisation
-     *          (`vmovdqu` / `memcpy`), significantly accelerating string copies during trade generation.
-     */
     inline void copy_char_to_char(char *dest, const char *src, size_t max_len) noexcept
     {
         size_t len = strnlen(src, max_len);
@@ -85,16 +79,14 @@ namespace hft::matching
         /**
          * @struct PriceLevel
          * @brief Container representing an aggregated price level in the order book.
-         *
-         * @details OPTIMIZATION (High Finding 1.5):
-         *          Maintains `cached_total_qty` incrementally on every order addition, match, and removal.
-         *          `total_qty()` returns `cached_total_qty` directly in 1 CPU cycle (O(1)) instead of
-         *          iterating and summing up to 32 `BookOrder` entries on every BBO query.
+         * @details Uses a circular FIFO order ring buffer (head_order_idx) to ensure O(1) order pops
+         *          without shifting subsequent BookOrder array elements on execution.
          */
         struct PriceLevel
         {
             int64_t price{0};
             std::array<BookOrder, MAX_ORDERS_PER_LEVEL> orders{};
+            size_t head_order_idx{0};
             size_t order_count{0};
             uint32_t cached_total_qty{0};
 
@@ -102,21 +94,117 @@ namespace hft::matching
             {
                 return cached_total_qty;
             }
+
+            void reset() noexcept
+            {
+                price = 0;
+                head_order_idx = 0;
+                order_count = 0;
+                cached_total_qty = 0;
+            }
+
+            [[nodiscard]] BookOrder &front_order() noexcept
+            {
+                return orders[head_order_idx];
+            }
+
+            [[nodiscard]] const BookOrder &front_order() const noexcept
+            {
+                return orders[head_order_idx];
+            }
+
+            void pop_front_order() noexcept
+            {
+                if (order_count > 0)
+                {
+                    head_order_idx = (head_order_idx + 1) % MAX_ORDERS_PER_LEVEL;
+                    --order_count;
+                    if (order_count == 0)
+                    {
+                        head_order_idx = 0;
+                    }
+                }
+            }
+
+            void push_back_order(uint64_t id, std::string_view cl_ord_id, int side, int64_t p, uint32_t qty,
+                                 uint64_t ts) noexcept
+            {
+                if (order_count < MAX_ORDERS_PER_LEVEL)
+                {
+                    size_t idx = (head_order_idx + order_count) % MAX_ORDERS_PER_LEVEL;
+                    auto &node = orders[idx];
+                    node.order_id = id;
+                    copy_sv_to_char(node.cl_ord_id, cl_ord_id, MAX_CL_ORD_ID_LEN - 1);
+                    node.side = side;
+                    node.price = p;
+                    node.remaining_qty = qty;
+                    node.timestamp_ns = ts;
+                    node.active = true;
+                    cached_total_qty += qty;
+                    ++order_count;
+                }
+            }
         };
 
-        std::array<PriceLevel, MAX_BOOK_LEVELS> m_bids{}; // Sorted descending
+        // Pre-allocated pools and pointer indirection arrays for price levels
+        std::array<PriceLevel, MAX_BOOK_LEVELS> m_bid_pool{};
+        std::array<PriceLevel *, MAX_BOOK_LEVELS> m_bid_free_list{};
+        size_t m_bid_free_count{MAX_BOOK_LEVELS};
+        std::array<PriceLevel *, MAX_BOOK_LEVELS> m_bids{}; // 8-byte pointers sorted descending
         size_t m_bid_levels{0};
 
-        std::array<PriceLevel, MAX_BOOK_LEVELS> m_asks{}; // Sorted ascending
+        std::array<PriceLevel, MAX_BOOK_LEVELS> m_ask_pool{};
+        std::array<PriceLevel *, MAX_BOOK_LEVELS> m_ask_free_list{};
+        size_t m_ask_free_count{MAX_BOOK_LEVELS};
+        std::array<PriceLevel *, MAX_BOOK_LEVELS> m_asks{}; // 8-byte pointers sorted ascending
         size_t m_ask_levels{0};
 
         uint64_t m_total_trades{0};
         uint64_t m_total_volume{0};
 
+        PriceLevel *acquire_bid_level() noexcept
+        {
+            if (m_bid_free_count == 0)
+                return nullptr;
+            PriceLevel *lvl = m_bid_free_list[--m_bid_free_count];
+            lvl->reset();
+            return lvl;
+        }
+
+        void release_bid_level(PriceLevel *lvl) noexcept
+        {
+            if (m_bid_free_count < MAX_BOOK_LEVELS && lvl != nullptr)
+            {
+                m_bid_free_list[m_bid_free_count++] = lvl;
+            }
+        }
+
+        PriceLevel *acquire_ask_level() noexcept
+        {
+            if (m_ask_free_count == 0)
+                return nullptr;
+            PriceLevel *lvl = m_ask_free_list[--m_ask_free_count];
+            lvl->reset();
+            return lvl;
+        }
+
+        void release_ask_level(PriceLevel *lvl) noexcept
+        {
+            if (m_ask_free_count < MAX_BOOK_LEVELS && lvl != nullptr)
+            {
+                m_ask_free_list[m_ask_free_count++] = lvl;
+            }
+        }
+
       public:
         explicit ZeroAllocHftOrderBook(std::string_view symbol = "PETR4") noexcept
         {
             copy_sv_to_char(m_symbol, symbol, sizeof(m_symbol) - 1);
+            for (size_t i = 0; i < MAX_BOOK_LEVELS; ++i)
+            {
+                m_bid_free_list[i] = &m_bid_pool[i];
+                m_ask_free_list[i] = &m_ask_pool[i];
+            }
         }
 
         /**
@@ -139,13 +227,13 @@ namespace hft::matching
                 // Match against best Asks (Asks sorted ascending)
                 while (m_ask_levels > 0 && remaining_qty > 0)
                 {
-                    auto &best_level = m_asks[0];
-                    if (order.price < best_level.price)
+                    PriceLevel *best_level = m_asks[0];
+                    if (order.price < best_level->price)
                         break; // Price limit reached
 
-                    while (best_level.order_count > 0 && remaining_qty > 0)
+                    while (best_level->order_count > 0 && remaining_qty > 0)
                     {
-                        auto &passive_order = best_level.orders[0];
+                        auto &passive_order = best_level->front_order();
                         uint32_t match_qty = std::min(remaining_qty, passive_order.remaining_qty);
 
                         if (trades_generated < max_trades && out_trades != nullptr)
@@ -164,22 +252,18 @@ namespace hft::matching
                         m_total_volume += match_qty;
                         remaining_qty -= match_qty;
                         passive_order.remaining_qty -= match_qty;
-                        best_level.cached_total_qty -= match_qty;
+                        best_level->cached_total_qty -= match_qty;
 
                         if (passive_order.remaining_qty == 0)
                         {
-                            // Shift remaining orders in level left
-                            for (size_t k = 0; k < best_level.order_count - 1; ++k)
-                            {
-                                best_level.orders[k] = best_level.orders[k + 1];
-                            }
-                            best_level.order_count--;
+                            best_level->pop_front_order(); // O(1) circular buffer advance!
                         }
                     }
 
-                    if (best_level.order_count == 0)
+                    if (best_level->order_count == 0)
                     {
-                        // Shift remaining ask levels left
+                        release_ask_level(best_level);
+                        // Shift remaining ask level POINTERS left (8 bytes each, NOT 2,048 bytes!)
                         for (size_t l = 0; l < m_ask_levels - 1; ++l)
                         {
                             m_asks[l] = m_asks[l + 1];
@@ -199,13 +283,13 @@ namespace hft::matching
                 // Match against best Bids (Bids sorted descending)
                 while (m_bid_levels > 0 && remaining_qty > 0)
                 {
-                    auto &best_level = m_bids[0];
-                    if (order.price > best_level.price)
+                    PriceLevel *best_level = m_bids[0];
+                    if (order.price > best_level->price)
                         break; // Price limit reached
 
-                    while (best_level.order_count > 0 && remaining_qty > 0)
+                    while (best_level->order_count > 0 && remaining_qty > 0)
                     {
-                        auto &passive_order = best_level.orders[0];
+                        auto &passive_order = best_level->front_order();
                         uint32_t match_qty = std::min(remaining_qty, passive_order.remaining_qty);
 
                         if (trades_generated < max_trades && out_trades != nullptr)
@@ -224,22 +308,18 @@ namespace hft::matching
                         m_total_volume += match_qty;
                         remaining_qty -= match_qty;
                         passive_order.remaining_qty -= match_qty;
-                        best_level.cached_total_qty -= match_qty;
+                        best_level->cached_total_qty -= match_qty;
 
                         if (passive_order.remaining_qty == 0)
                         {
-                            // Shift remaining orders in level left
-                            for (size_t k = 0; k < best_level.order_count - 1; ++k)
-                            {
-                                best_level.orders[k] = best_level.orders[k + 1];
-                            }
-                            best_level.order_count--;
+                            best_level->pop_front_order(); // O(1) circular buffer advance!
                         }
                     }
 
-                    if (best_level.order_count == 0)
+                    if (best_level->order_count == 0)
                     {
-                        // Shift remaining bid levels left
+                        release_bid_level(best_level);
+                        // Shift remaining bid level POINTERS left (8 bytes each, NOT 2,048 bytes!)
                         for (size_t l = 0; l < m_bid_levels - 1; ++l)
                         {
                             m_bids[l] = m_bids[l + 1];
@@ -260,20 +340,20 @@ namespace hft::matching
 
         [[nodiscard]] int64_t best_bid_price() const noexcept
         {
-            return m_bid_levels > 0 ? m_bids[0].price : 0;
+            return m_bid_levels > 0 ? m_bids[0]->price : 0;
         }
         [[nodiscard]] uint32_t best_bid_qty() const noexcept
         {
-            return m_bid_levels > 0 ? m_bids[0].total_qty() : 0;
+            return m_bid_levels > 0 ? m_bids[0]->total_qty() : 0;
         }
 
         [[nodiscard]] int64_t best_ask_price() const noexcept
         {
-            return m_ask_levels > 0 ? m_asks[0].price : 0;
+            return m_ask_levels > 0 ? m_asks[0]->price : 0;
         }
         [[nodiscard]] uint32_t best_ask_qty() const noexcept
         {
-            return m_ask_levels > 0 ? m_asks[0].total_qty() : 0;
+            return m_ask_levels > 0 ? m_asks[0]->total_qty() : 0;
         }
 
         [[nodiscard]] size_t bid_levels_count() const noexcept
@@ -287,28 +367,28 @@ namespace hft::matching
 
         [[nodiscard]] int64_t get_bid_level_price(size_t index) const noexcept
         {
-            return index < m_bid_levels ? m_bids[index].price : 0;
+            return index < m_bid_levels ? m_bids[index]->price : 0;
         }
         [[nodiscard]] uint32_t get_bid_level_qty(size_t index) const noexcept
         {
-            return index < m_bid_levels ? m_bids[index].total_qty() : 0;
+            return index < m_bid_levels ? m_bids[index]->total_qty() : 0;
         }
         [[nodiscard]] uint32_t get_bid_level_order_count(size_t index) const noexcept
         {
-            return index < m_bid_levels ? static_cast<uint32_t>(m_bids[index].order_count) : 0;
+            return index < m_bid_levels ? static_cast<uint32_t>(m_bids[index]->order_count) : 0;
         }
 
         [[nodiscard]] int64_t get_ask_level_price(size_t index) const noexcept
         {
-            return index < m_ask_levels ? m_asks[index].price : 0;
+            return index < m_ask_levels ? m_asks[index]->price : 0;
         }
         [[nodiscard]] uint32_t get_ask_level_qty(size_t index) const noexcept
         {
-            return index < m_ask_levels ? m_asks[index].total_qty() : 0;
+            return index < m_ask_levels ? m_asks[index]->total_qty() : 0;
         }
         [[nodiscard]] uint32_t get_ask_level_order_count(size_t index) const noexcept
         {
-            return index < m_ask_levels ? static_cast<uint32_t>(m_asks[index].order_count) : 0;
+            return index < m_ask_levels ? static_cast<uint32_t>(m_asks[index]->order_count) : 0;
         }
 
         [[nodiscard]] uint64_t total_trades() const noexcept
@@ -323,40 +403,26 @@ namespace hft::matching
       private:
         /**
          * @brief Inserts an un-matched order into the order book price levels.
-         *
-         * @details OPTIMIZATION (High Finding 1.4):
-         *          Uses O(log N) binary search (`low`/`high` bisection) to locate existing price levels or the
-         *          insertion position. Requires at most 6 comparisons for 64 levels instead of up to 64 linear
-         * comparisons.
+         * @details Locates existing level via binary search or allocates a new level node from the pool,
+         *          shifting only 8-byte level pointers (avoiding 2 KB PriceLevel struct copies).
          */
-        void add_to_book(std::array<PriceLevel, MAX_BOOK_LEVELS> &levels, size_t &level_count, bool is_bid,
+        void add_to_book(std::array<PriceLevel *, MAX_BOOK_LEVELS> &levels, size_t &level_count, bool is_bid,
                          const hft::protocol::ParsedOrder &order, uint32_t qty, uint64_t timestamp_ns) noexcept
         {
-            // Binary search for matching price level or insertion position
             size_t low = 0;
             size_t high = level_count;
 
             while (low < high)
             {
                 size_t mid = low + (high - low) / 2;
-                if (levels[mid].price == order.price)
+                if (levels[mid]->price == order.price)
                 {
-                    if (levels[mid].order_count < MAX_ORDERS_PER_LEVEL)
-                    {
-                        auto &node = levels[mid].orders[levels[mid].order_count++];
-                        node.order_id = order.seq_num;
-                        copy_sv_to_char(node.cl_ord_id, order.cl_ord_id, MAX_CL_ORD_ID_LEN - 1);
-                        node.side = order.side;
-                        node.price = order.price;
-                        node.remaining_qty = qty;
-                        node.timestamp_ns = timestamp_ns;
-                        node.active = true;
-                        levels[mid].cached_total_qty += qty;
-                    }
+                    levels[mid]->push_back_order(order.seq_num, order.cl_ord_id, order.side, order.price, qty,
+                                                 timestamp_ns);
                     return;
                 }
 
-                bool is_better = is_bid ? (order.price > levels[mid].price) : (order.price < levels[mid].price);
+                bool is_better = is_bid ? (order.price > levels[mid]->price) : (order.price < levels[mid]->price);
                 if (is_better)
                 {
                     high = mid;
@@ -367,29 +433,23 @@ namespace hft::matching
                 }
             }
 
-            // Create new price level at insertion position
+            // Create new price level from pool at insertion position
             size_t insert_pos = low;
             if (level_count < MAX_BOOK_LEVELS)
             {
+                PriceLevel *new_level = is_bid ? acquire_bid_level() : acquire_ask_level();
+                if (new_level == nullptr)
+                    return;
+
+                // Shift pointer array right (8 bytes each instead of 2 KB PriceLevel structs!)
                 for (size_t j = level_count; j > insert_pos; --j)
                 {
                     levels[j] = levels[j - 1];
                 }
 
-                auto &new_level = levels[insert_pos];
-                new_level.price = order.price;
-                new_level.order_count = 1;
-                new_level.cached_total_qty = qty;
-
-                auto &node = new_level.orders[0];
-                node.order_id = order.seq_num;
-                copy_sv_to_char(node.cl_ord_id, order.cl_ord_id, MAX_CL_ORD_ID_LEN - 1);
-                node.side = order.side;
-                node.price = order.price;
-                node.remaining_qty = qty;
-                node.timestamp_ns = timestamp_ns;
-                node.active = true;
-
+                levels[insert_pos] = new_level;
+                new_level->price = order.price;
+                new_level->push_back_order(order.seq_num, order.cl_ord_id, order.side, order.price, qty, timestamp_ns);
                 level_count++;
             }
         }
