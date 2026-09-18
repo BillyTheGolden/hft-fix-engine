@@ -193,9 +193,55 @@ target_link_options(hft_order_book_engine PRIVATE -Wl,-z,common-page-size=209715
 # Google Protocol Buffers Configuration
 set(protobuf_MODULE_COMPATIBLE ON)
 find_package(Protobuf CONFIG REQUIRED)
+
+set(PROTO_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/proto)
 set(PROTO_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 file(MAKE_DIRECTORY ${PROTO_GEN_DIR})
+
+# Locate protoc executable
+if(TARGET protobuf::protoc)
+    get_target_property(PROTOC_PATH protobuf::protoc IMPORTED_LOCATION_RELEASE)
+    if(NOT PROTOC_PATH)
+        get_target_property(PROTOC_PATH protobuf::protoc IMPORTED_LOCATION)
+    endif()
+endif()
+if(NOT PROTOC_PATH)
+    set(PROTOC_PATH ${Protobuf_PROTOC_EXECUTABLE})
+endif()
+if(NOT PROTOC_PATH)
+    find_program(PROTOC_PATH protoc REQUIRED)
+endif()
+
+# Pre-generate Protobuf C++ bindings immediately during CMake configuration
+execute_process(
+    COMMAND ${PROTOC_PATH}
+            --proto_path=${PROTO_SRC_DIR}
+            --cpp_out=${PROTO_GEN_DIR}
+            ${PROTO_SRC_DIR}/telemetry.proto
+    RESULT_VARIABLE PROTOC_CONFIG_RESULT
+)
+if(PROTOC_CONFIG_RESULT EQUAL 0)
+    message(STATUS "Protobuf telemetry bindings pre-generated at configure-time in: ${PROTO_GEN_DIR}")
+    # Also generate into CMAKE_CURRENT_BINARY_DIR so both include paths contain telemetry.pb.h
+    execute_process(
+        COMMAND ${PROTOC_PATH}
+                --proto_path=${PROTO_SRC_DIR}
+                --cpp_out=${CMAKE_CURRENT_BINARY_DIR}
+                ${PROTO_SRC_DIR}/telemetry.proto
+    )
+else()
+    message(WARNING "Failed to pre-generate Protobuf bindings at configure-time (exit code: ${PROTOC_CONFIG_RESULT})")
+endif()
+
+# Build-time incremental generation rule
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS proto/telemetry.proto)
+
+add_custom_target(generate_proto
+    COMMAND ${PROTOC_PATH} --proto_path=${PROTO_SRC_DIR} --cpp_out=${PROTO_GEN_DIR} ${PROTO_SRC_DIR}/telemetry.proto
+    COMMAND ${PROTOC_PATH} --proto_path=${PROTO_SRC_DIR} --cpp_out=${CMAKE_CURRENT_BINARY_DIR} ${PROTO_SRC_DIR}/telemetry.proto
+    COMMENT "Manually generating Protobuf C++ bindings for telemetry.proto"
+    VERBATIM
+)
 
 add_library(hft_telemetry_proto STATIC ${PROTO_SRCS} ${PROTO_HDRS})
 target_include_directories(hft_telemetry_proto PUBLIC 
@@ -256,4 +302,8 @@ if(DOXYGEN_FOUND)
         COMMENT "Generating Doxygen API documentation..."
         VERBATIM
     )
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/monitoring_app/CMakeLists.txt")
+    add_subdirectory(monitoring_app)
 endif()
